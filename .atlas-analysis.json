@@ -1,0 +1,127 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "CoW Protocol Contracts",
+  "projectDescription": "Smart contracts and TypeScript SDK for Gnosis Protocol v2, enabling batch auction trading with on-chain settlement.",
+  "theme": "aspen",
+  "primaryColor": "#7c7c7c",
+  "lightColor": "#121212",
+  "darkColor": "#c6c6c6",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/settlement",
+              "concepts/orders",
+              "concepts/solvers",
+              "concepts/authentication"
+            ]
+          },
+          {
+            "group": "Smart Contracts",
+            "pages": [
+              "contracts/overview",
+              "contracts/settlement",
+              "contracts/vault-relayer",
+              "contracts/authentication",
+              "contracts/libraries"
+            ]
+          },
+          {
+            "group": "TypeScript SDK",
+            "pages": [
+              "sdk/overview",
+              "sdk/orders",
+              "sdk/signing",
+              "sdk/settlement",
+              "sdk/interactions"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/networks",
+              "deployment/addresses",
+              "deployment/verification"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/building",
+              "development/testing",
+              "development/benchmarking"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Contract API",
+            "pages": [
+              "api/contracts/settlement",
+              "api/contracts/vault-relayer",
+              "api/contracts/authentication",
+              "api/contracts/order",
+              "api/contracts/trade",
+              "api/contracts/interaction"
+            ]
+          },
+          {
+            "group": "TypeScript API",
+            "pages": [
+              "api/ts/domain",
+              "api/ts/order",
+              "api/ts/signing",
+              "api/ts/settlement",
+              "api/ts/interaction",
+              "api/ts/vault",
+              "api/ts/deploy"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Batch auction settlement with Balancer Vault integration",
+    "EIP-712 order signing with multiple signature schemes",
+    "Solver authentication and authorization system",
+    "TypeScript SDK for order creation and interaction",
+    "Multi-chain deployment support (Ethereum, Gnosis Chain, Arbitrum, Optimism, BSC, Polygon, Base, Avalanche)",
+    "Flexible order types (fill-or-kill, partial fill, buy/sell orders)",
+    "Pre/intra/post settlement interactions for AMM integration",
+    "Gas-optimized smart contracts with extensive testing"
+  ],
+  "publicApiSurface": [
+    "GPv2Settlement.settle()",
+    "GPv2Settlement.invalidateOrder()",
+    "GPv2Settlement.setPreSignature()",
+    "GPv2Settlement.domainSeparator()",
+    "GPv2AllowListAuthentication.isSolver()",
+    "GPv2AllowListAuthentication.addSolver()",
+    "GPv2AllowListAuthentication.removeSolver()",
+    "GPv2VaultRelayer.transferFromAccounts()",
+    "domain() - EIP-712 domain creation",
+    "Order interface - Order creation and validation",
+    "signOrder() - Order signing utilities",
+    "encodeSettlement() - Settlement encoding",
+    "encodeInteraction() - Interaction encoding",
+    "computeOrderUid() - Order UID computation",
+    "hashTypedData() - EIP-712 hashing"
+  ]
+}
