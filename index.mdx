@@ -58,7 +58,7 @@ mode: custom
       Import the SDK and create a signed order:
       
       ```typescript
-      import { Order, domain, signOrder } from "@cowprotocol/contracts";
+      import { Order, domain, signOrder, computeOrderUid } from "@cowprotocol/contracts";
       import { ethers } from "ethers";
 
       const order: Order = {

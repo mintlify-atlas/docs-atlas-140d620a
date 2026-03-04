@@ -106,7 +106,9 @@
               "api/ts/signing",
               "api/ts/settlement",
               "api/ts/interaction",
+              "api/ts/swap",
               "api/ts/vault",
+              "api/ts/proxy",
               "api/ts/deploy"
             ]
           }

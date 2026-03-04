@@ -1,0 +1,172 @@
+---
+title: Proxy utilities
+description: EIP-1967 proxy inspection and EIP-173 proxy interface utilities
+---
+
+The proxy module provides utilities for working with EIP-1967 and EIP-173 proxy contracts used by the CoW Protocol deployment system.
+
+## Functions
+
+### implementationAddress
+
+Retrieves the implementation address from an EIP-1967 compatible proxy contract.
+
+<ParamField path="provider" type="ethers.providers.Provider" required>
+  Ethers.js provider for reading blockchain state
+</ParamField>
+
+<ParamField path="proxy" type="string" required>
+  Address of the proxy contract to inspect
+</ParamField>
+
+<ResponseField name="implementation" type="Promise<string>">
+  The address of the implementation contract
+</ResponseField>
+
+```typescript
+import { implementationAddress } from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+const provider = new ethers.providers.JsonRpcProvider("https://rpc.gnosis.gateway.fm");
+const proxyAddress = "0x2c4c28DDBdAc9C5E7055b4C863b72eA0149D8aFE";
+
+const implementation = await implementationAddress(provider, proxyAddress);
+console.log("Implementation:", implementation);
+```
+
+### ownerAddress
+
+Retrieves the admin/owner address from an EIP-1967 compatible proxy contract.
+
+<ParamField path="provider" type="ethers.providers.Provider" required>
+  Ethers.js provider for reading blockchain state
+</ParamField>
+
+<ParamField path="proxy" type="string" required>
+  Address of the proxy contract to inspect
+</ParamField>
+
+<ResponseField name="owner" type="Promise<string>">
+  The address of the proxy administrator
+</ResponseField>
+
+```typescript
+import { ownerAddress } from "@cowprotocol/contracts";
+
+const owner = await ownerAddress(provider, proxyAddress);
+console.log("Proxy owner:", owner);
+```
+
+## Constants
+
+### EIP173_PROXY_ABI
+
+Human-readable ABI for EIP-173 proxy contracts. This ABI includes the ownership management interface.
+
+```typescript
+export const EIP173_PROXY_ABI = [
+  "event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)",
+  "function owner() view external returns(address)",
+  "function transferOwnership(address newOwner) external",
+  "function supportsInterface(bytes4 interfaceID) external view returns (bool)",
+];
+```
+
+## Utility Functions
+
+### proxyInterface
+
+Creates an Ethers.js contract instance for interacting with the proxy admin interface.
+
+<ParamField path="contract" type="Contract" required>
+  An Ethers.js contract instance for the proxy
+</ParamField>
+
+<ResponseField name="proxyContract" type="Contract">
+  Contract instance with EIP-173 proxy ABI attached
+</ResponseField>
+
+```typescript
+import { proxyInterface } from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+// Get the implementation contract
+const authenticator = new ethers.Contract(
+  "0x2c4c28DDBdAc9C5E7055b4C863b72eA0149D8aFE",
+  authenticatorAbi,
+  signer
+);
+
+// Get the proxy interface for admin operations
+const proxy = proxyInterface(authenticator);
+
+// Check current owner
+const currentOwner = await proxy.owner();
+
+// Transfer ownership (requires current owner signer)
+await proxy.transferOwnership("0xNewOwnerAddress...");
+```
+
+## EIP-1967 Storage Slots
+
+The module internally uses EIP-1967 standard storage slots:
+
+- **Implementation slot**: `keccak256("eip1967.proxy.implementation") - 1`
+- **Admin slot**: `keccak256("eip1967.proxy.admin") - 1`
+
+These slots are used to read the implementation and admin addresses from proxy contract storage without requiring function calls.
+
+## Use Cases
+
+### Verify Proxy Configuration
+
+```typescript
+import { implementationAddress, ownerAddress } from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+async function verifyProxy(provider: ethers.providers.Provider, proxyAddr: string) {
+  const implementation = await implementationAddress(provider, proxyAddr);
+  const owner = await ownerAddress(provider, proxyAddr);
+  
+  console.log(`Proxy: ${proxyAddr}`);
+  console.log(`Implementation: ${implementation}`);
+  console.log(`Owner: ${owner}`);
+  
+  return { implementation, owner };
+}
+```
+
+### Transfer Proxy Ownership
+
+```typescript
+import { proxyInterface } from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+async function transferProxyOwnership(
+  proxyContract: ethers.Contract,
+  newOwner: string
+) {
+  const proxy = proxyInterface(proxyContract);
+  
+  // Verify current ownership
+  const currentOwner = await proxy.owner();
+  console.log("Current owner:", currentOwner);
+  
+  // Transfer ownership (requires signer to be current owner)
+  const tx = await proxy.transferOwnership(newOwner);
+  await tx.wait();
+  
+  console.log("Ownership transferred to:", newOwner);
+}
+```
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Deploy Module" icon="rocket" href="/api/ts/deploy">
+    Deterministic deployment utilities
+  </Card>
+  <Card title="Authentication Contract" icon="shield" href="/contracts/authentication">
+    Proxy-based authenticator contract
+  </Card>
+</CardGroup>

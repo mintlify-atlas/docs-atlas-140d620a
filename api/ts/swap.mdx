@@ -1,0 +1,351 @@
+---
+title: Swap encoding
+description: Utilities for encoding Balancer swap requests for direct order settlement
+---
+
+The swap module provides utilities for encoding orders that are settled directly against Balancer pools using the `swap()` function on the GPv2Settlement contract.
+
+## Interfaces
+
+### Swap
+
+Represents a Balancer swap used for settling a single order against Balancer pools.
+
+<ResponseField name="poolId" type="BytesLike" required>
+  The ID of the Balancer pool to swap against
+</ResponseField>
+
+<ResponseField name="assetIn" type="string" required>
+  Address of the input token
+</ResponseField>
+
+<ResponseField name="assetOut" type="string" required>
+  Address of the output token
+</ResponseField>
+
+<ResponseField name="amount" type="BigNumberish" required>
+  The amount to swap. For sell orders, this is the input amount. For buy orders, this is the output amount.
+</ResponseField>
+
+<ResponseField name="userData" type="BytesLike">
+  Optional pool-specific user data required for certain pool types
+</ResponseField>
+
+### BatchSwapStep
+
+An encoded Balancer swap step that can be passed to the settlement contract.
+
+<ResponseField name="poolId" type="BytesLike" required>
+  The ID of the Balancer pool
+</ResponseField>
+
+<ResponseField name="assetInIndex" type="number" required>
+  Index of the input token in the tokens array
+</ResponseField>
+
+<ResponseField name="assetOutIndex" type="number" required>
+  Index of the output token in the tokens array
+</ResponseField>
+
+<ResponseField name="amount" type="BigNumberish" required>
+  The swap amount
+</ResponseField>
+
+<ResponseField name="userData" type="BytesLike" required>
+  Pool-specific user data (empty if not needed)
+</ResponseField>
+
+### SwapExecution
+
+Parameters for swap execution that allow tighter slippage control.
+
+<ResponseField name="limitAmount" type="BigNumberish" required>
+  The limit amount for the swap. This allows solvers to specify tighter slippage than the order's limit to reduce MEV.
+</ResponseField>
+
+### EncodedSwap
+
+A tuple representing a fully encoded swap ready for the settlement contract.
+
+```typescript
+type EncodedSwap = [
+  BatchSwapStep[],  // Swap requests
+  string[],         // Token addresses
+  Trade,            // Encoded trade
+];
+```
+
+## SwapEncoder Class
+
+A builder class for encoding swap calldata step-by-step.
+
+### Constructor
+
+```typescript
+constructor(domain: TypedDataDomain)
+```
+
+<ParamField path="domain" type="TypedDataDomain" required>
+  The EIP-712 domain for signing orders
+</ParamField>
+
+### Properties
+
+<ResponseField name="tokens" type="string[]">
+  Array of token addresses used in the encoded swaps (read-only)
+</ResponseField>
+
+<ResponseField name="swaps" type="BatchSwapStep[]">
+  Array of encoded swap steps (read-only)
+</ResponseField>
+
+<ResponseField name="trade" type="Trade">
+  The encoded trade (throws if not yet encoded)
+</ResponseField>
+
+### Methods
+
+#### encodeSwapStep
+
+Encodes swap steps and appends them to the encoder.
+
+```typescript
+encodeSwapStep(...swaps: Swap[]): void
+```
+
+<ParamField path="swaps" type="Swap[]" required>
+  One or more swaps to encode
+</ParamField>
+
+#### encodeTrade
+
+Encodes a trade from a signed order.
+
+```typescript
+encodeTrade(
+  order: Order,
+  signature: Signature,
+  swapExecution?: Partial<SwapExecution>
+): void
+```
+
+<ParamField path="order" type="Order" required>
+  The order to encode
+</ParamField>
+
+<ParamField path="signature" type="Signature" required>
+  The signature for the order
+</ParamField>
+
+<ParamField path="swapExecution" type="Partial<SwapExecution>">
+  Optional execution parameters for tighter limits
+</ParamField>
+
+#### signEncodeTrade
+
+Signs an order and encodes a trade in one step.
+
+```typescript
+async signEncodeTrade(
+  order: Order,
+  owner: Signer,
+  scheme: EcdsaSigningScheme,
+  swapExecution?: Partial<SwapExecution>
+): Promise<void>
+```
+
+<ParamField path="order" type="Order" required>
+  The order to sign and encode
+</ParamField>
+
+<ParamField path="owner" type="Signer" required>
+  The signer for the order
+</ParamField>
+
+<ParamField path="scheme" type="EcdsaSigningScheme" required>
+  The signing scheme to use (EIP712 or ETHSIGN)
+</ParamField>
+
+<ParamField path="swapExecution" type="Partial<SwapExecution>">
+  Optional execution parameters
+</ParamField>
+
+#### encodedSwap
+
+Returns the complete encoded swap data.
+
+```typescript
+encodedSwap(): EncodedSwap
+```
+
+<ResponseField name="result" type="EncodedSwap">
+  Tuple of [swaps, tokens, trade] ready for the settlement contract
+</ResponseField>
+
+#### encodeSwap (static)
+
+Utility method for encoding a swap in one call. Has multiple overloads:
+
+```typescript
+// With pre-signed order
+static encodeSwap(
+  swaps: Swap[],
+  order: Order,
+  signature: Signature,
+  swapExecution?: Partial<SwapExecution>
+): EncodedSwap
+
+// With signing
+static encodeSwap(
+  domain: TypedDataDomain,
+  swaps: Swap[],
+  order: Order,
+  owner: Signer,
+  scheme: EcdsaSigningScheme,
+  swapExecution?: Partial<SwapExecution>
+): Promise<EncodedSwap>
+```
+
+## Usage Examples
+
+### Encode a Direct Balancer Swap
+
+```typescript
+import { SwapEncoder, domain, Order, OrderKind } from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+const chainId = 1;
+const settlementContract = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
+const domainSeparator = domain(chainId, settlementContract);
+
+// Create the order
+const order: Order = {
+  sellToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
+  buyToken: "0x6B175474E89094C44Da98b954EedeAC495271d0F",  // DAI
+  sellAmount: ethers.utils.parseEther("1.0"),
+  buyAmount: ethers.utils.parseEther("2000"),
+  validTo: Math.floor(Date.now() / 1000) + 3600,
+  appData: ethers.constants.HashZero,
+  feeAmount: ethers.utils.parseEther("0.01"),
+  kind: OrderKind.SELL,
+  partiallyFillable: false,
+};
+
+// Define Balancer pool swap
+const swap = {
+  poolId: "0x...", // Balancer pool ID
+  assetIn: order.sellToken,
+  assetOut: order.buyToken,
+  amount: order.sellAmount,
+};
+
+// Encode the swap with signing
+const signer = new ethers.Wallet("0x...");
+const encodedSwap = await SwapEncoder.encodeSwap(
+  domainSeparator,
+  [swap],
+  order,
+  signer,
+  "eip712"
+);
+
+const [swaps, tokens, trade] = encodedSwap;
+console.log("Encoded swap ready for settlement");
+```
+
+### Multi-Hop Swap Through Multiple Pools
+
+```typescript
+import { SwapEncoder } from "@cowprotocol/contracts";
+
+const encoder = new SwapEncoder(domainSeparator);
+
+// Add multiple swap steps for routing through pools
+encoder.encodeSwapStep(
+  {
+    poolId: "0xPoolId1...",
+    assetIn: "0xWETH...",
+    assetOut: "0xUSDC...",
+    amount: ethers.utils.parseEther("1.0"),
+  },
+  {
+    poolId: "0xPoolId2...",
+    assetIn: "0xUSDC...",
+    assetOut: "0xDAI...",
+    amount: 0, // Amount computed from previous swap
+  }
+);
+
+// Sign and encode the trade
+await encoder.signEncodeTrade(order, signer, "eip712");
+
+// Get the complete encoding
+const [swaps, tokens, trade] = encoder.encodedSwap();
+```
+
+### Tighter Slippage Control
+
+```typescript
+import { SwapEncoder } from "@cowprotocol/contracts";
+
+const encoder = new SwapEncoder(domainSeparator);
+encoder.encodeSwapStep(swap);
+
+// Encode with tighter limit than order specified
+await encoder.signEncodeTrade(
+  order,
+  signer,
+  "eip712",
+  {
+    limitAmount: ethers.utils.parseEther("2100"), // Tighter than order's 2000
+  }
+);
+
+const encoded = encoder.encodedSwap();
+```
+
+## Functions
+
+### encodeSwapStep
+
+Standalone function to encode a single swap step.
+
+```typescript
+function encodeSwapStep(
+  tokens: TokenRegistry,
+  swap: Swap
+): BatchSwapStep
+```
+
+<ParamField path="tokens" type="TokenRegistry" required>
+  Token registry for mapping addresses to indices
+</ParamField>
+
+<ParamField path="swap" type="Swap" required>
+  The swap to encode
+</ParamField>
+
+<ResponseField name="batchSwapStep" type="BatchSwapStep">
+  Encoded swap step with token indices
+</ResponseField>
+
+## Notes
+
+<Note>
+The swap module is specifically for direct settlement against Balancer pools using the `swap()` function. For settlements with multiple orders and interactions, use the `SettlementEncoder` class instead.
+</Note>
+
+<Info>
+The `userData` field in swaps is pool-implementation specific. Most standard Balancer pools don't require it, but specialized pools might use it for additional parameters.
+</Info>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Settlement Encoding" icon="scale-balanced" href="/api/ts/settlement">
+    Full settlement encoding with multiple trades
+  </Card>
+  <Card title="Vault Module" icon="vault" href="/api/ts/vault">
+    Balancer Vault integration utilities
+  </Card>
+</CardGroup>
