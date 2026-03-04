@@ -1,0 +1,424 @@
+---
+title: GPv2Order
+description: Library for handling order data structures and operations in Gnosis Protocol v2
+---
+
+The `GPv2Order` library defines the core order data structure and provides utility functions for order hashing, UID packing, and parameter extraction.
+
+## Library Overview
+
+```solidity
+library GPv2Order
+```
+
+This library contains all order-related data structures and operations used throughout the protocol.
+
+## Data Structures
+
+### Data
+
+```solidity
+struct Data {
+    IERC20 sellToken;
+    IERC20 buyToken;
+    address receiver;
+    uint256 sellAmount;
+    uint256 buyAmount;
+    uint32 validTo;
+    bytes32 appData;
+    uint256 feeAmount;
+    bytes32 kind;
+    bool partiallyFillable;
+    bytes32 sellTokenBalance;
+    bytes32 buyTokenBalance;
+}
+```
+
+The complete data structure for a Gnosis Protocol order. This struct contains all order parameters that are signed for submitting to the protocol.
+
+<ParamField path="sellToken" type="IERC20">
+  The ERC20 token being sold
+</ParamField>
+
+<ParamField path="buyToken" type="IERC20">
+  The ERC20 token being bought
+</ParamField>
+
+<ParamField path="receiver" type="address">
+  The address to receive the buy tokens. Use `address(0)` to indicate the receiver is the same as the order owner.
+</ParamField>
+
+<ParamField path="sellAmount" type="uint256">
+  The amount of sell tokens
+</ParamField>
+
+<ParamField path="buyAmount" type="uint256">
+  The amount of buy tokens
+</ParamField>
+
+<ParamField path="validTo" type="uint32">
+  The Unix timestamp until which the order is valid
+</ParamField>
+
+<ParamField path="appData" type="bytes32">
+  Application-specific data (e.g., for attaching metadata to orders)
+</ParamField>
+
+<ParamField path="feeAmount" type="uint256">
+  The fee amount in sell token
+</ParamField>
+
+<ParamField path="kind" type="bytes32">
+  The order kind: `KIND_SELL` or `KIND_BUY`
+</ParamField>
+
+<ParamField path="partiallyFillable" type="bool">
+  Whether the order can be partially filled (`true`) or is fill-or-kill (`false`)
+</ParamField>
+
+<ParamField path="sellTokenBalance" type="bytes32">
+  The sell token balance source: `BALANCE_ERC20`, `BALANCE_EXTERNAL`, or `BALANCE_INTERNAL`
+</ParamField>
+
+<ParamField path="buyTokenBalance" type="bytes32">
+  The buy token balance destination: `BALANCE_ERC20` or `BALANCE_INTERNAL`
+</ParamField>
+
+## Constants
+
+### TYPE_HASH
+
+```solidity
+bytes32 internal constant TYPE_HASH =
+    hex"d5a25ba2e97094ad7d83dc28a6572da797d6b3e7fc6663bd93efb789fc17e489"
+```
+
+The order EIP-712 type hash for the `GPv2Order.Data` struct. This is precomputed from:
+
+```
+keccak256(
+    "Order(" +
+        "address sellToken," +
+        "address buyToken," +
+        "address receiver," +
+        "uint256 sellAmount," +
+        "uint256 buyAmount," +
+        "uint32 validTo," +
+        "bytes32 appData," +
+        "uint256 feeAmount," +
+        "string kind," +
+        "bool partiallyFillable," +
+        "string sellTokenBalance," +
+        "string buyTokenBalance" +
+    ")"
+)
+```
+
+### KIND_SELL
+
+```solidity
+bytes32 internal constant KIND_SELL =
+    hex"f3b277728b3fee749481eb3e0b3b48980dbbab78658fc419025cb16eee346775"
+```
+
+The marker value for a sell order. Precomputed from `keccak256("sell")`.
+
+In a sell order, the `sellAmount` is fixed and the `buyAmount` is the minimum to receive.
+
+### KIND_BUY
+
+```solidity
+bytes32 internal constant KIND_BUY =
+    hex"6ed88e868af0a1983e3886d5f3e95a2fafbd6c3450bc229e27342283dc429ccc"
+```
+
+The marker value for a buy order. Precomputed from `keccak256("buy")`.
+
+In a buy order, the `buyAmount` is fixed and the `sellAmount` is the maximum to send.
+
+### BALANCE_ERC20
+
+```solidity
+bytes32 internal constant BALANCE_ERC20 =
+    hex"5a28e9363bb942b639270062aa6bb295f434bcdfc42c97267bf003f272060dc9"
+```
+
+The TokenBalance marker for using direct ERC20 balances. Precomputed from `keccak256("erc20")`.
+
+### BALANCE_EXTERNAL
+
+```solidity
+bytes32 internal constant BALANCE_EXTERNAL =
+    hex"abee3b73373acd583a130924aad6dc38cfdc44ba0555ba94ce2ff63980ea0632"
+```
+
+The TokenBalance marker for using Balancer Vault external balances. This allows re-using Vault ERC20 approvals. Precomputed from `keccak256("external")`.
+
+### BALANCE_INTERNAL
+
+```solidity
+bytes32 internal constant BALANCE_INTERNAL =
+    hex"4ac99ace14ee0a5ef932dc609df0943ab7ac16b7583634612f8dc35a4289a6ce"
+```
+
+The TokenBalance marker for using Balancer Vault internal balances. Precomputed from `keccak256("internal")`.
+
+### RECEIVER_SAME_AS_OWNER
+
+```solidity
+address internal constant RECEIVER_SAME_AS_OWNER = address(0)
+```
+
+Marker address indicating that the receiver of trade proceeds should be the owner of the order. This is `address(0)` for gas efficiency as it's the most common case.
+
+### UID_LENGTH
+
+```solidity
+uint256 internal constant UID_LENGTH = 56
+```
+
+The byte length of an order unique identifier. A UID consists of:
+- 32 bytes: order digest
+- 20 bytes: owner address
+- 4 bytes: validTo timestamp
+
+## Functions
+
+### actualReceiver
+
+```solidity
+function actualReceiver(
+    Data memory order,
+    address owner
+) internal pure returns (address receiver)
+```
+
+Returns the actual receiver for an order. Checks whether the `receiver` field uses the marker value to indicate it is the same as the order owner.
+
+<ParamField path="order" type="Data">
+  The order data
+</ParamField>
+
+<ParamField path="owner" type="address">
+  The order owner address
+</ParamField>
+
+<ResponseField name="receiver" type="address">
+  The actual receiver of trade proceeds. Returns `owner` if the order's receiver is `address(0)`.
+</ResponseField>
+
+### hash
+
+```solidity
+function hash(
+    Data memory order,
+    bytes32 domainSeparator
+) internal pure returns (bytes32 orderDigest)
+```
+
+Returns the EIP-712 signing hash for the specified order.
+
+<ParamField path="order" type="Data">
+  The order to compute the EIP-712 signing hash for
+</ParamField>
+
+<ParamField path="domainSeparator" type="bytes32">
+  The EIP-712 domain separator to use
+</ParamField>
+
+<ResponseField name="orderDigest" type="bytes32">
+  The 32-byte EIP-712 struct hash that should be signed
+</ResponseField>
+
+#### Implementation Details
+
+The hash is computed following the EIP-712 standard:
+
+```
+orderDigest = keccak256("\x19\x01" || domainSeparator || structHash)
+```
+
+Where `structHash` is:
+
+```
+structHash = keccak256(TYPE_HASH || encode(order))
+```
+
+<Info>
+The implementation uses inline assembly for gas optimization, computing the struct hash in place with 416 bytes (13 fields × 32 bytes).
+</Info>
+
+### packOrderUidParams
+
+```solidity
+function packOrderUidParams(
+    bytes memory orderUid,
+    bytes32 orderDigest,
+    address owner,
+    uint32 validTo
+) internal pure
+```
+
+Packs order UID parameters into the specified memory location. The result is equivalent to `abi.encodePacked(...)` but allows re-using memory.
+
+<ParamField path="orderUid" type="bytes">
+  The buffer to pack the order UID parameters into. Must be exactly 56 bytes.
+</ParamField>
+
+<ParamField path="orderDigest" type="bytes32">
+  The EIP-712 struct digest derived from the order parameters
+</ParamField>
+
+<ParamField path="owner" type="address">
+  The address of the user who owns this order
+</ParamField>
+
+<ParamField path="validTo" type="uint32">
+  The epoch time at which the order will stop being valid
+</ParamField>
+
+<Warning>
+This function reverts with "GPv2: uid buffer overflow" if the order UID buffer is not exactly 56 bytes.
+</Warning>
+
+#### UID Format
+
+The UID is packed as:
+
+```
+Byte Range | Field
+-----------+----------------
+0:32       | orderDigest
+32:52      | owner (20 bytes)
+52:56      | validTo (4 bytes)
+```
+
+### extractOrderUidParams
+
+```solidity
+function extractOrderUidParams(
+    bytes calldata orderUid
+)
+    internal
+    pure
+    returns (bytes32 orderDigest, address owner, uint32 validTo)
+```
+
+Extracts specific order information from the standardized unique order ID.
+
+<ParamField path="orderUid" type="bytes">
+  The unique identifier representing an order. Must be exactly 56 bytes containing the packed order digest, owner address, and validTo timestamp.
+</ParamField>
+
+<ResponseField name="orderDigest" type="bytes32">
+  The EIP-712 signing digest derived from the order parameters
+</ResponseField>
+
+<ResponseField name="owner" type="address">
+  The address of the user who owns this order
+</ResponseField>
+
+<ResponseField name="validTo" type="uint32">
+  The epoch time at which the order will stop being valid
+</ResponseField>
+
+<Warning>
+This function reverts with "GPv2: invalid uid" if the order UID is not exactly 56 bytes.
+</Warning>
+
+<Info>
+The function uses assembly for efficient decoding of packed calldata, avoiding unnecessary memory copies.
+</Info>
+
+## Usage Examples
+
+### Creating an Order
+
+```solidity
+GPv2Order.Data memory order = GPv2Order.Data({
+    sellToken: IERC20(DAI_ADDRESS),
+    buyToken: IERC20(USDC_ADDRESS),
+    receiver: address(0), // Same as owner
+    sellAmount: 1000e18,   // 1000 DAI
+    buyAmount: 990e6,      // 990 USDC minimum
+    validTo: uint32(block.timestamp + 1 hours),
+    appData: bytes32(0),
+    feeAmount: 10e18,      // 10 DAI fee
+    kind: GPv2Order.KIND_SELL,
+    partiallyFillable: false,
+    sellTokenBalance: GPv2Order.BALANCE_ERC20,
+    buyTokenBalance: GPv2Order.BALANCE_ERC20
+});
+```
+
+### Computing Order Hash
+
+```solidity
+// Compute the order digest for signing
+bytes32 domainSeparator = settlement.domainSeparator();
+bytes32 orderDigest = order.hash(domainSeparator);
+
+// Sign the digest (off-chain)
+bytes memory signature = signMessage(orderDigest);
+```
+
+### Creating Order UID
+
+```solidity
+// Allocate UID buffer
+bytes memory orderUid = new bytes(GPv2Order.UID_LENGTH);
+
+// Pack UID parameters
+order.packOrderUidParams(
+    orderUid,
+    orderDigest,
+    msg.sender,
+    order.validTo
+);
+```
+
+### Extracting Order UID
+
+```solidity
+// Extract parameters from UID
+(
+    bytes32 digest,
+    address owner,
+    uint32 validTo
+) = orderUid.extractOrderUidParams();
+```
+
+## Order Types
+
+### Sell Orders vs Buy Orders
+
+**Sell Order** (`KIND_SELL`):
+- Fixed `sellAmount`: User specifies exact amount to sell
+- Variable `buyAmount`: Minimum amount to receive
+- Example: "Sell exactly 1 ETH for at least 1800 USDC"
+
+**Buy Order** (`KIND_BUY`):
+- Variable `sellAmount`: Maximum amount to sell
+- Fixed `buyAmount`: User specifies exact amount to buy
+- Example: "Buy exactly 1800 USDC for at most 1 ETH"
+
+### Fill-or-Kill vs Partially Fillable
+
+**Fill-or-Kill** (`partiallyFillable = false`):
+- Order must be completely filled in a single settlement
+- If full amount cannot be filled, order is not executed
+
+**Partially Fillable** (`partiallyFillable = true`):
+- Order can be filled across multiple settlements
+- `filledAmount` tracks cumulative fills
+- Useful for large orders that may require multiple batches
+
+## Balance Types
+
+Orders support three balance types for flexibility:
+
+| Balance Type | Description | Use Case |
+|--------------|-------------|----------|
+| `BALANCE_ERC20` | Direct ERC20 token balances | Standard trading |
+| `BALANCE_EXTERNAL` | Balancer Vault external balances | Reuse Vault approvals |
+| `BALANCE_INTERNAL` | Balancer Vault internal balances | Tokens already in Vault |

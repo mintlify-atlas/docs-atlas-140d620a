@@ -1,0 +1,391 @@
+---
+title: GPv2Trade
+description: Library for encoding and decoding trade data in settlement batches
+---
+
+The `GPv2Trade` library handles the compact encoding of trade data for gas-efficient batch settlements. It provides functions to extract order data from trades and decode trade flags.
+
+## Library Overview
+
+```solidity
+library GPv2Trade
+```
+
+This library is used to efficiently pack and unpack trade information, including order parameters and signing schemes, using a flags-based encoding system.
+
+## Data Structures
+
+### Data
+
+```solidity
+struct Data {
+    uint256 sellTokenIndex;
+    uint256 buyTokenIndex;
+    address receiver;
+    uint256 sellAmount;
+    uint256 buyAmount;
+    uint32 validTo;
+    bytes32 appData;
+    uint256 feeAmount;
+    uint256 flags;
+    uint256 executedAmount;
+    bytes signature;
+}
+```
+
+Represents a trade to be executed as part of a batch settlement. Trades use token indices instead of addresses for gas efficiency.
+
+<ParamField path="sellTokenIndex" type="uint256">
+  Index into the tokens array for the sell token
+</ParamField>
+
+<ParamField path="buyTokenIndex" type="uint256">
+  Index into the tokens array for the buy token
+</ParamField>
+
+<ParamField path="receiver" type="address">
+  The address to receive the buy tokens. Use `address(0)` to indicate the receiver is the same as the order owner.
+</ParamField>
+
+<ParamField path="sellAmount" type="uint256">
+  The amount of sell tokens
+</ParamField>
+
+<ParamField path="buyAmount" type="uint256">
+  The amount of buy tokens
+</ParamField>
+
+<ParamField path="validTo" type="uint32">
+  The Unix timestamp until which the order is valid
+</ParamField>
+
+<ParamField path="appData" type="bytes32">
+  Application-specific data
+</ParamField>
+
+<ParamField path="feeAmount" type="uint256">
+  The fee amount in sell token
+</ParamField>
+
+<ParamField path="flags" type="uint256">
+  Packed flags encoding order kind, fill type, balance types, and signing scheme
+</ParamField>
+
+<ParamField path="executedAmount" type="uint256">
+  For partially fillable orders: the amount to execute. For fill-or-kill orders: ignored.
+</ParamField>
+
+<ParamField path="signature" type="bytes">
+  The order signature bytes
+</ParamField>
+
+## Functions
+
+### extractOrder
+
+```solidity
+function extractOrder(
+    Data calldata trade,
+    IERC20[] calldata tokens,
+    GPv2Order.Data memory order
+) internal pure returns (GPv2Signing.Scheme signingScheme)
+```
+
+Extracts the order data and signing scheme from a trade.
+
+<ParamField path="trade" type="Data">
+  The trade data to extract from
+</ParamField>
+
+<ParamField path="tokens" type="IERC20[]">
+  The list of tokens included in the settlement. Token indices in the trade map to tokens in this array.
+</ParamField>
+
+<ParamField path="order" type="GPv2Order.Data">
+  The memory location to write the extracted order data to
+</ParamField>
+
+<ResponseField name="signingScheme" type="GPv2Signing.Scheme">
+  The signing scheme extracted from the trade flags (EIP-712, eth_sign, EIP-1271, or PreSign)
+</ResponseField>
+
+<Info>
+This function decodes the trade's token indices, amounts, and flags to populate a full `GPv2Order.Data` struct.
+</Info>
+
+### extractFlags
+
+```solidity
+function extractFlags(
+    uint256 flags
+)
+    internal
+    pure
+    returns (
+        bytes32 kind,
+        bool partiallyFillable,
+        bytes32 sellTokenBalance,
+        bytes32 buyTokenBalance,
+        GPv2Signing.Scheme signingScheme
+    )
+```
+
+Decodes trade flags into individual order parameters.
+
+<ParamField path="flags" type="uint256">
+  The packed flags value to decode
+</ParamField>
+
+<ResponseField name="kind" type="bytes32">
+  The order kind: `GPv2Order.KIND_SELL` or `GPv2Order.KIND_BUY`
+</ResponseField>
+
+<ResponseField name="partiallyFillable" type="bool">
+  Whether the order can be partially filled
+</ResponseField>
+
+<ResponseField name="sellTokenBalance" type="bytes32">
+  The sell token balance source: `BALANCE_ERC20`, `BALANCE_EXTERNAL`, or `BALANCE_INTERNAL`
+</ResponseField>
+
+<ResponseField name="buyTokenBalance" type="bytes32">
+  The buy token balance destination: `BALANCE_ERC20` or `BALANCE_INTERNAL`
+</ResponseField>
+
+<ResponseField name="signingScheme" type="GPv2Signing.Scheme">
+  The signature scheme: `Eip712`, `EthSign`, `Eip1271`, or `PreSign`
+</ResponseField>
+
+## Flag Encoding
+
+Trade flags use a compact bitfield to encode multiple order parameters in a single `uint256`. The flags are designed so that `0x00` represents the most common case: a fill-or-kill sell order by an externally owned account using EIP-712 signatures.
+
+### Flag Format
+
+```
+bit | 31 ...   | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+----+----------+-------+---+-------+---+---+
+    | reserved | *   * | * | *   * | * | * |
+                 |   |   |   |   |   |   |
+                 |   |   |   |   |   |   +---- order kind bit
+                 |   |   |   |   |   |         0: sell order
+                 |   |   |   |   |   |         1: buy order
+                 |   |   |   |   |   |
+                 |   |   |   |   |   +-------- order fill bit
+                 |   |   |   |   |             0: fill-or-kill
+                 |   |   |   |   |             1: partially fillable
+                 |   |   |   |   |
+                 |   |   |   +---+------------ sell token balance bits
+                 |   |   |                     0x: ERC20 balance
+                 |   |   |                     10: external Balancer Vault
+                 |   |   |                     11: internal Balancer Vault
+                 |   |   |
+                 |   |   +-------------------- buy token balance bit
+                 |   |                         0: ERC20 balance
+                 |   |                         1: internal Balancer Vault
+                 |   |
+                 +---+------------------------ signature scheme bits
+                                               00: EIP-712
+                                               01: eth_sign
+                                               10: EIP-1271
+                                               11: pre_sign
+```
+
+### Bit Positions
+
+| Bits | Parameter | Values |
+|------|-----------|--------|
+| 0 | Order kind | `0` = sell, `1` = buy |
+| 1 | Fill type | `0` = fill-or-kill, `1` = partially fillable |
+| 2-3 | Sell balance | `00/01` = ERC20, `10` = external Vault, `11` = internal Vault |
+| 4 | Buy balance | `0` = ERC20, `1` = internal Vault |
+| 5-6 | Signing scheme | `00` = EIP-712, `01` = eth_sign, `10` = EIP-1271, `11` = PreSign |
+| 7-31 | Reserved | Must be `0` |
+
+### Flag Extraction Logic
+
+```solidity
+// Extract order kind
+if (flags & 0x01 == 0) {
+    kind = GPv2Order.KIND_SELL;
+} else {
+    kind = GPv2Order.KIND_BUY;
+}
+
+// Extract partially fillable flag
+partiallyFillable = flags & 0x02 != 0;
+
+// Extract sell token balance
+if (flags & 0x08 == 0) {
+    sellTokenBalance = GPv2Order.BALANCE_ERC20;
+} else if (flags & 0x04 == 0) {
+    sellTokenBalance = GPv2Order.BALANCE_EXTERNAL;
+} else {
+    sellTokenBalance = GPv2Order.BALANCE_INTERNAL;
+}
+
+// Extract buy token balance
+if (flags & 0x10 == 0) {
+    buyTokenBalance = GPv2Order.BALANCE_ERC20;
+} else {
+    buyTokenBalance = GPv2Order.BALANCE_INTERNAL;
+}
+
+// Extract signing scheme (bits 5-6)
+signingScheme = GPv2Signing.Scheme(flags >> 5);
+```
+
+<Warning>
+The function reverts if any reserved bits (7-31) are non-zero, as this would produce an invalid `GPv2Signing.Scheme` enum value.
+</Warning>
+
+## Usage Examples
+
+### Creating a Trade
+
+```solidity
+// Sell 1000 DAI for 990 USDC (DAI is index 0, USDC is index 1)
+GPv2Trade.Data memory trade = GPv2Trade.Data({
+    sellTokenIndex: 0,
+    buyTokenIndex: 1,
+    receiver: address(0),
+    sellAmount: 1000e18,
+    buyAmount: 990e6,
+    validTo: uint32(block.timestamp + 1 hours),
+    appData: bytes32(0),
+    feeAmount: 10e18,
+    flags: 0x00, // Sell, fill-or-kill, ERC20, EIP-712
+    executedAmount: 0, // Ignored for fill-or-kill
+    signature: orderSignature
+});
+```
+
+### Computing Flags
+
+```solidity
+// Helper function to compute flags
+function computeFlags(
+    bool isBuyOrder,
+    bool isPartiallyFillable,
+    bool useInternalSellBalance,
+    bool useExternalSellBalance,
+    bool useInternalBuyBalance,
+    uint8 signingScheme
+) internal pure returns (uint256) {
+    uint256 flags = 0;
+    
+    if (isBuyOrder) flags |= 0x01;
+    if (isPartiallyFillable) flags |= 0x02;
+    
+    if (useInternalSellBalance) {
+        flags |= 0x0C; // bits 2 and 3
+    } else if (useExternalSellBalance) {
+        flags |= 0x08; // bit 3 only
+    }
+    // else: ERC20 (bits 2-3 stay 0)
+    
+    if (useInternalBuyBalance) flags |= 0x10;
+    
+    flags |= uint256(signingScheme) << 5;
+    
+    return flags;
+}
+
+// Example: Partially fillable buy order using internal balances and EIP-1271
+uint256 flags = computeFlags(
+    true,  // buy order
+    true,  // partially fillable
+    true,  // use internal sell balance
+    false, // not external
+    true,  // use internal buy balance
+    2      // EIP-1271
+);
+// Result: 0x5F (binary: 01011111)
+```
+
+### Extracting Order from Trade
+
+```solidity
+// Given tokens array and trade data
+IERC20[] memory tokens = new IERC20[](2);
+tokens[0] = IERC20(DAI_ADDRESS);
+tokens[1] = IERC20(USDC_ADDRESS);
+
+GPv2Order.Data memory order;
+GPv2Signing.Scheme scheme = GPv2Trade.extractOrder(
+    trade,
+    tokens,
+    order
+);
+
+// Now order is populated with:
+// - sellToken = DAI
+// - buyToken = USDC
+// - Other fields from trade
+// And scheme contains the signing method
+```
+
+## Common Flag Values
+
+| Description | Flags (hex) | Binary |
+|-------------|-------------|--------|
+| Sell, fill-or-kill, ERC20, EIP-712 | `0x00` | `00000000` |
+| Buy, fill-or-kill, ERC20, EIP-712 | `0x01` | `00000001` |
+| Sell, partially fillable, ERC20, EIP-712 | `0x02` | `00000010` |
+| Sell, fill-or-kill, ERC20, eth_sign | `0x20` | `00100000` |
+| Sell, fill-or-kill, ERC20, EIP-1271 | `0x40` | `01000000` |
+| Sell, fill-or-kill, ERC20, PreSign | `0x60` | `01100000` |
+| Sell, fill-or-kill, internal Vault, EIP-712 | `0x1C` | `00011100` |
+| Sell, fill-or-kill, external Vault, EIP-712 | `0x08` | `00001000` |
+
+## Signing Schemes
+
+The signing scheme determines how order signatures are validated:
+
+### EIP-712 (0x00)
+
+Standard typed data signing for Ethereum wallets. Most common for EOAs.
+
+```solidity
+signingScheme = GPv2Signing.Scheme.Eip712;
+```
+
+### eth_sign (0x01)
+
+Legacy Ethereum message signing using `\x19Ethereum Signed Message`.
+
+```solidity
+signingScheme = GPv2Signing.Scheme.EthSign;
+```
+
+### EIP-1271 (0x02)
+
+Contract signature validation for smart contract wallets (e.g., Gnosis Safe).
+
+```solidity
+signingScheme = GPv2Signing.Scheme.Eip1271;
+```
+
+### PreSign (0x03)
+
+On-chain pre-approval of orders. No cryptographic signature required.
+
+```solidity
+signingScheme = GPv2Signing.Scheme.PreSign;
+```
+
+<Info>
+The signing scheme is extracted from bits 5-6 of the flags using `flags >> 5`.
+</Info>
+
+## Gas Optimization
+
+The trade encoding is optimized for gas efficiency:
+
+1. **Token Indices**: Using indices instead of addresses saves 20 bytes per token reference
+2. **Flags**: Packing multiple boolean/enum values into a single `uint256` reduces calldata size
+3. **Common Case**: The default flags value (`0x00`) represents the most common order type, minimizing non-zero bytes in calldata
+
+<Note>
+In Ethereum, calldata costs 4 gas per zero byte and 16 gas per non-zero byte. Optimizing for common cases reduces overall gas costs significantly in batch settlements.
+</Note>

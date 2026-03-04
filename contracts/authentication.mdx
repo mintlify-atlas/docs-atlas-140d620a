@@ -1,0 +1,468 @@
+---
+title: 'GPv2AllowListAuthentication Contract'
+description: 'Solver authorization and access control for CoW Protocol settlements'
+---
+
+## Overview
+
+The `GPv2AllowListAuthentication` contract manages solver authorization for the CoW Protocol. It implements an allowlist-based access control system that determines which addresses can execute settlements. The contract supports both manager-based control and proxy-based ownership.
+
+```solidity
+contract GPv2AllowListAuthentication is
+    GPv2Authentication,
+    Initializable,
+    StorageAccessible
+{
+    // Implementation
+}
+```
+
+**Source**: `src/contracts/GPv2AllowListAuthentication.sol`  
+**License**: LGPL-3.0-or-later  
+**Solidity**: `>=0.7.6 <0.9.0`
+
+## Architecture
+
+The authentication system uses a two-tier access control model:
+
+<CardGroup cols={2}>
+  <Card title="Manager" icon="user-gear">
+    Day-to-day solver management - can add/remove solvers
+  </Card>
+
+  <Card title="Proxy Owner" icon="crown">
+    Top-level admin - can change manager and access storage
+  </Card>
+</CardGroup>
+
+## Inheritance
+
+```
+GPv2AllowListAuthentication
+├── GPv2Authentication (Interface)
+│   └── isSolver(address) external view returns (bool)
+├── Initializable
+│   └── Supports proxy pattern initialization
+└── StorageAccessible
+    └── Direct storage access for proxy admin
+```
+
+## Contract State
+
+### Public Variables
+
+<ParamField path="manager" type="address">
+  The address with permissions to add and remove solvers. Can be changed by the current manager or proxy owner.
+</ParamField>
+
+```solidity
+address public manager;
+```
+
+### Private Variables
+
+<ParamField path="solvers" type="mapping(address => bool)">
+  The set of allowed solvers. Allowed solvers have a value of `true`. This mapping is private and accessed via the `isSolver()` function.
+</ParamField>
+
+```solidity
+mapping(address => bool) private solvers;
+```
+
+## Initialization
+
+### initializeManager
+
+Initializes the manager to a specific address. This method is called once after contract creation.
+
+```solidity
+function initializeManager(address manager_) external initializer
+```
+
+<ParamField path="manager_" type="address" required>
+  The manager address to initialize the contract with.
+</ParamField>
+
+<Note>
+  This function uses the `initializer` modifier, making it callable only once. This pattern supports deployment behind a proxy contract.
+</Note>
+
+```solidity
+manager = manager_;
+emit ManagerChanged(manager_, address(0));
+```
+
+## Modifiers
+
+### onlyManager
+
+Ensures a method can only be called by the contract manager.
+
+```solidity
+modifier onlyManager() {
+    require(manager == msg.sender, "GPv2: caller not manager");
+    _;
+}
+```
+
+Used for:
+- Adding solvers
+- Removing solvers
+
+### onlyManagerOrOwner
+
+Ensures a method can be called by either the manager or the proxy owner.
+
+```solidity
+modifier onlyManagerOrOwner() {
+    require(
+        manager == msg.sender || GPv2EIP1967.getAdmin() == msg.sender,
+        "GPv2: not authorized"
+    );
+    _;
+}
+```
+
+<Note>
+  This modifier uses EIP-1967 compliant storage slot to retrieve the proxy admin address.
+</Note>
+
+Used for:
+- Changing the manager
+
+## Core Functions
+
+### setManager
+
+Sets a new manager for the contract.
+
+```solidity
+function setManager(address manager_) external onlyManagerOrOwner
+```
+
+<ParamField path="manager_" type="address" required>
+  The new manager address.
+</ParamField>
+
+This method can be called by:
+- **Current manager**: To transfer the role to another address
+- **Proxy owner**: To appoint a new manager (emergency admin action)
+
+```solidity
+address oldManager = manager;
+manager = manager_;
+emit ManagerChanged(manager_, oldManager);
+```
+
+### addSolver
+
+Adds an address to the set of allowed solvers.
+
+```solidity
+function addSolver(address solver) external onlyManager
+```
+
+<ParamField path="solver" type="address" required>
+  The solver address to add to the allowlist.
+</ParamField>
+
+<Note>
+  This function is idempotent - calling it multiple times with the same address has no additional effect.
+</Note>
+
+```solidity
+solvers[solver] = true;
+emit SolverAdded(solver);
+```
+
+### removeSolver
+
+Removes an address from the set of allowed solvers.
+
+```solidity
+function removeSolver(address solver) external onlyManager
+```
+
+<ParamField path="solver" type="address" required>
+  The solver address to remove from the allowlist.
+</ParamField>
+
+<Note>
+  This function is idempotent - calling it on an address not in the allowlist has no effect.
+</Note>
+
+```solidity
+solvers[solver] = false;
+emit SolverRemoved(solver);
+```
+
+### isSolver
+
+Checks whether an address is an authorized solver.
+
+```solidity
+function isSolver(
+    address prospectiveSolver
+) external view override returns (bool)
+```
+
+<ParamField path="prospectiveSolver" type="address" required>
+  The address to check for solver authorization.
+</ParamField>
+
+<ParamField path="returns" type="bool">
+  `true` if the address is an authorized solver, `false` otherwise.
+</ParamField>
+
+```solidity
+return solvers[prospectiveSolver];
+```
+
+This function is called by the settlement contract's `onlySolver` modifier:
+
+```solidity
+// In GPv2Settlement.sol
+modifier onlySolver() {
+    require(authenticator.isSolver(msg.sender), "GPv2: not a solver");
+    _;
+}
+```
+
+## Events
+
+### ManagerChanged
+
+Emitted when the manager changes.
+
+```solidity
+event ManagerChanged(address newManager, address oldManager);
+```
+
+<ParamField path="newManager" type="address">
+  The address of the new manager.
+</ParamField>
+
+<ParamField path="oldManager" type="address">
+  The address of the previous manager.
+</ParamField>
+
+### SolverAdded
+
+Emitted when a solver is added to the allowlist.
+
+```solidity
+event SolverAdded(address solver);
+```
+
+<ParamField path="solver" type="address">
+  The address of the solver that was added.
+</ParamField>
+
+### SolverRemoved
+
+Emitted when a solver is removed from the allowlist.
+
+```solidity
+event SolverRemoved(address solver);
+```
+
+<ParamField path="solver" type="address">
+  The address of the solver that was removed.
+</ParamField>
+
+## Usage Examples
+
+### Initial Setup
+
+<CodeGroup>
+```solidity Deploy and Initialize
+// Deploy authentication contract
+GPv2AllowListAuthentication auth = new GPv2AllowListAuthentication();
+
+// Initialize with manager address
+auth.initializeManager(managerAddress);
+```
+
+```solidity Deploy Settlement
+// Deploy settlement with authenticator
+GPv2Settlement settlement = new GPv2Settlement(
+    auth,  // authenticator
+    balancerVault  // vault
+);
+```
+</CodeGroup>
+
+### Managing Solvers
+
+<CodeGroup>
+```solidity Add Solver
+// Manager adds a new solver
+auth.addSolver(solverAddress);
+
+// Check authorization
+bool isAuthorized = auth.isSolver(solverAddress);
+require(isAuthorized, "Solver not added");
+```
+
+```solidity Remove Solver
+// Manager removes a solver
+auth.removeSolver(badSolverAddress);
+
+// Verify removal
+bool isAuthorized = auth.isSolver(badSolverAddress);
+require(!isAuthorized, "Solver not removed");
+```
+
+```solidity Change Manager
+// Current manager transfers role
+auth.setManager(newManagerAddress);
+
+// Or proxy owner appoints new manager (emergency)
+auth.setManager(emergencyManagerAddress); // Called by proxy owner
+```
+</CodeGroup>
+
+### Batch Operations
+
+```solidity
+// Add multiple solvers in a loop
+address[] memory newSolvers = [
+    0x1234...,
+    0x5678...,
+    0x9abc...
+];
+
+for (uint i = 0; i < newSolvers.length; i++) {
+    auth.addSolver(newSolvers[i]);
+}
+```
+
+## Proxy Pattern Support
+
+The contract is designed to work with EIP-1967 compliant proxies:
+
+### EIP-1967 Storage Slot
+
+The proxy admin is stored at a specific storage slot:
+
+```solidity
+// From GPv2EIP1967.sol
+bytes32 private constant ADMIN_SLOT = 
+    0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;
+
+function getAdmin() internal view returns (address admin) {
+    bytes32 slot = ADMIN_SLOT;
+    assembly {
+        admin := sload(slot)
+    }
+}
+```
+
+### Why Use a Proxy?
+
+<AccordionGroup>
+  <Accordion title="Upgradeability">
+    The authentication logic can be upgraded without changing the settlement contract's authenticator address.
+  </Accordion>
+
+  <Accordion title="Initialization">
+    Proxies allow constructor-like initialization after deployment via `initializeManager()`.
+  </Accordion>
+
+  <Accordion title="Emergency Admin">
+    Proxy owner can override manager decisions if needed (e.g., compromised manager).
+  </Accordion>
+</AccordionGroup>
+
+## Access Control Matrix
+
+| Action | Manager | Proxy Owner | Anyone |
+|--------|---------|-------------|---------|
+| `addSolver()` | ✅ | ❌ | ❌ |
+| `removeSolver()` | ✅ | ❌ | ❌ |
+| `setManager()` | ✅ | ✅ | ❌ |
+| `isSolver()` | ✅ | ✅ | ✅ |
+| `initializeManager()` | ❌* | ❌* | ❌* |
+
+<Note>
+  `*` `initializeManager()` can only be called once, immediately after deployment
+</Note>
+
+## Security Considerations
+
+<CardGroup cols={2}>
+  <Card title="Manager Security" icon="shield-halved">
+    The manager key should be secured (hardware wallet, multisig) as it controls solver access.
+  </Card>
+
+  <Card title="Proxy Owner" icon="crown">
+    The proxy owner should be a governance contract or high-security multisig for emergency actions.
+  </Card>
+
+  <Card title="Solver Monitoring" icon="eye">
+    Monitor SolverAdded/SolverRemoved events to track authorization changes.
+  </Card>
+
+  <Card title="Initialization" icon="lock">
+    Ensure `initializeManager()` is called immediately after deployment to prevent unauthorized initialization.
+  </Card>
+</CardGroup>
+
+## Integration Example
+
+### Complete Setup Workflow
+
+```solidity
+// 1. Deploy authentication contract (potentially behind proxy)
+GPv2AllowListAuthentication auth = new GPv2AllowListAuthentication();
+
+// 2. Initialize with manager
+auth.initializeManager(managerAddress);
+
+// 3. Add initial solvers
+auth.addSolver(solver1);
+auth.addSolver(solver2);
+
+// 4. Deploy settlement contract
+GPv2Settlement settlement = new GPv2Settlement(
+    auth,
+    balancerVault
+);
+
+// 5. Solvers can now execute settlements
+settlement.settle(
+    tokens,
+    clearingPrices,
+    trades,
+    interactions
+); // Only works if msg.sender is in solver allowlist
+```
+
+## Monitoring and Events
+
+Track authentication changes using events:
+
+```javascript
+// Listen for solver additions
+auth.on('SolverAdded', (solver) => {
+    console.log(`Solver added: ${solver}`);
+    // Update monitoring dashboard
+});
+
+// Listen for solver removals
+auth.on('SolverRemoved', (solver) => {
+    console.log(`Solver removed: ${solver}`);
+    // Alert security team
+});
+
+// Listen for manager changes
+auth.on('ManagerChanged', (newManager, oldManager) => {
+    console.log(`Manager changed from ${oldManager} to ${newManager}`);
+    // Alert governance
+});
+```
+
+## Related Contracts
+
+- [GPv2Settlement](/contracts/settlement) - Uses authenticator to restrict settlement access
+- [GPv2Authentication Interface](/contracts/libraries#gpv2authentication) - Interface implemented by this contract

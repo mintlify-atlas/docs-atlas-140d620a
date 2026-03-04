@@ -1,0 +1,51 @@
+---
+title: Introduction
+description: Learn about CoW Protocol and its smart contract architecture for gasless, MEV-protected trading
+---
+
+## What is CoW Protocol?
+
+CoW Protocol (formerly Gnosis Protocol v2) is a fully permissionless trading protocol that leverages batch auctions to provide MEV protection and gasless trading for users. The protocol enables traders to exchange tokens without worrying about front-running, sandwich attacks, or paying gas fees upfront.
+
+## Key features
+
+**MEV protection**: Orders are settled in batches through a competitive solver auction, protecting traders from front-running and sandwich attacks.
+
+**Gasless trading**: Users sign orders off-chain using EIP-712, eliminating the need to pay gas fees for order placement or cancellation.
+
+**Coincidence of Wants (CoW)**: The protocol matches overlapping orders directly, reducing gas costs and improving prices by avoiding external liquidity sources when possible.
+
+**Access to all liquidity**: When CoWs aren't available, solvers tap into any on-chain liquidity source (Uniswap, Balancer, Curve, etc.) to find the best execution price.
+
+## How it works
+
+Users create and sign orders off-chain specifying what tokens they want to trade, amounts, limit prices, and validity periods. These orders are submitted to solvers who compete to find the best settlement by matching CoWs and routing through optimal liquidity sources. The winning settlement is then executed on-chain in a single transaction.
+
+<Note>
+The protocol uses EIP-712 typed data signatures, providing better security and user experience compared to traditional message signing.
+</Note>
+
+## Smart contract architecture
+
+The core smart contracts include:
+
+- **GPv2Settlement**: The main settlement contract that verifies signatures and executes trades
+- **GPv2VaultRelayer**: Manages token transfers and integrates with Balancer Vault for internal balances
+- **GPv2AllowListAuthentication**: Controls solver permissions and authentication
+
+## Getting started
+
+Ready to integrate CoW Protocol into your application?
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install the CoW Protocol contracts package
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Create and sign your first order
+  </Card>
+</CardGroup>
+
+## Learn more
+
+For comprehensive documentation on how the protocol works at the smart contract level, visit the [official CoW Protocol documentation](https://docs.cow.fi/cow-protocol/reference/contracts/core).

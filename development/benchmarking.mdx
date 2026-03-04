@@ -1,0 +1,319 @@
+---
+title: Benchmarking
+description: Tools and techniques for gas benchmarking and performance tracing of CoW Protocol smart contracts
+---
+
+## Overview
+
+The CoW Protocol Contracts project includes comprehensive benchmarking tools for measuring gas consumption, comparing performance across code changes, and generating detailed execution traces. These tools help optimize contract efficiency and identify gas optimization opportunities.
+
+## Benchmarking Commands
+
+<CodeGroup>
+```bash Full Benchmark Suite
+yarn bench
+```
+
+```bash Detailed Trace
+yarn bench:trace
+```
+
+```bash Compare with Git Ref
+yarn bench:compare [ref]
+```
+
+```bash Single Settlement
+yarn bench:single
+```
+</CodeGroup>
+
+## Running Benchmarks
+
+### Full Benchmark Suite
+
+Run gas benchmarks across a comprehensive set of settlement scenarios:
+
+```bash
+yarn bench
+```
+
+This command:
+- Executes `hardhat run bench/index.ts`
+- Tests multiple settlement scenarios
+- Measures gas consumption for each scenario
+- Outputs a summary of gas costs
+
+The benchmark suite covers:
+- Single and multiple order settlements
+- Various token pair combinations
+- Different interaction types (AMM, liquidity)
+- Edge cases and complex scenarios
+
+<Note>
+  Benchmarks should be run on a clean build without coverage instrumentation for accurate gas measurements.
+</Note>
+
+### Single Settlement Benchmark
+
+For focused testing of a specific settlement scenario:
+
+```bash
+yarn bench:single
+```
+
+Executes: `hardhat run bench/single.ts`
+
+### Protocol-Specific Benchmarks
+
+Benchmark specific DEX integrations:
+
+<CodeGroup>
+```bash Balancer
+yarn bench:balancer
+```
+
+```bash Uniswap
+yarn bench:uniswap
+```
+</CodeGroup>
+
+## Performance Tracing
+
+Generate detailed execution traces to identify gas consumption patterns:
+
+```bash
+yarn bench:trace
+```
+
+This command:
+- Runs `hardhat run bench/trace/index.ts`
+- Generates detailed call traces
+- Shows gas consumption at each step
+- Identifies expensive operations
+- Helps pinpoint optimization opportunities
+
+### Understanding Trace Output
+
+The trace output includes:
+
+- **Call stack**: Hierarchical view of contract calls
+- **Gas costs**: Per-operation gas consumption
+- **Storage operations**: SLOAD and SSTORE costs
+- **External calls**: Interaction costs with other contracts
+- **Event emissions**: Gas costs for logging
+
+<Steps>
+  <Step title="Run the trace">
+    ```bash
+    yarn bench:trace
+    ```
+  </Step>
+
+  <Step title="Analyze the output">
+    Review the trace to identify:
+    - Most expensive operations
+    - Redundant storage accesses
+    - Optimization opportunities
+  </Step>
+
+  <Step title="Implement optimizations">
+    Make targeted improvements based on trace insights.
+  </Step>
+
+  <Step title="Verify improvements">
+    Re-run benchmarks to confirm gas savings.
+  </Step>
+</Steps>
+
+## Comparing Performance
+
+Compare gas consumption between different code versions:
+
+```bash
+yarn bench:compare [ref]
+```
+
+This powerful tool:
+- Runs benchmarks on the current code
+- Checks out the specified git reference (branch, commit, tag)
+- Runs benchmarks on the reference code
+- Generates a comparison report
+- Defaults to the merge-base if no reference is provided
+
+### Usage Examples
+
+<CodeGroup>
+```bash Compare with main branch
+yarn bench:compare main
+```
+
+```bash Compare with specific commit
+yarn bench:compare abc1234
+```
+
+```bash Compare with merge-base (default)
+yarn bench:compare
+```
+
+```bash Compare with previous tag
+yarn bench:compare v1.0.0
+```
+</CodeGroup>
+
+### Comparison Script Details
+
+Executes: `bash bench/compare.sh`
+
+The script workflow:
+
+1. **Stash current changes** (if any)
+2. **Run benchmarks** on current code
+3. **Checkout reference** commit/branch
+4. **Run benchmarks** on reference code
+5. **Generate diff report** showing gas changes
+6. **Restore original state**
+
+### Interpreting Comparison Results
+
+The comparison output shows:
+
+- **Positive values**: Increased gas consumption (regression)
+- **Negative values**: Decreased gas consumption (improvement)
+- **Percentage changes**: Relative impact of changes
+- **Scenario breakdown**: Per-test-case comparisons
+
+<Warning>
+  Ensure you have no uncommitted changes that could affect benchmark results. The comparison script will stash changes temporarily.
+</Warning>
+
+## Best Practices
+
+### Before Benchmarking
+
+1. **Clean build**: Ensure contracts are built without coverage instrumentation
+   ```bash
+   yarn build:sol
+   ```
+
+2. **Stable environment**: Close unnecessary applications to reduce system variance
+
+3. **Consistent state**: Use the same blockchain state for comparable results
+
+### During Benchmarking
+
+- Run benchmarks multiple times for statistical significance
+- Document any non-standard configuration
+- Note the commit hash for reproducibility
+
+### After Benchmarking
+
+- Analyze results for unexpected changes
+- Investigate any significant gas increases
+- Document optimizations and their impact
+- Consider trade-offs between gas costs and code readability
+
+## Optimization Workflow
+
+<Steps>
+  <Step title="Baseline measurement">
+    Run initial benchmarks on the current implementation:
+    ```bash
+    yarn bench
+    ```
+  </Step>
+
+  <Step title="Identify hotspots">
+    Generate traces to find expensive operations:
+    ```bash
+    yarn bench:trace
+    ```
+  </Step>
+
+  <Step title="Implement optimization">
+    Make targeted code improvements based on trace analysis.
+  </Step>
+
+  <Step title="Verify improvement">
+    Compare against baseline:
+    ```bash
+    yarn bench:compare <baseline-commit>
+    ```
+  </Step>
+
+  <Step title="Test thoroughly">
+    Ensure optimizations don't break functionality:
+    ```bash
+    yarn test
+    ```
+  </Step>
+</Steps>
+
+## Gas Optimization Tips
+
+Common optimization strategies:
+
+### Storage Optimization
+- Pack variables into single storage slots
+- Use immutable and constant where possible
+- Minimize SSTORE operations
+- Cache storage reads in memory
+
+### Computation Optimization
+- Minimize loop iterations
+- Use unchecked blocks for safe math
+- Avoid redundant calculations
+- Optimize conditional logic
+
+### External Call Optimization
+- Batch operations when possible
+- Minimize external calls
+- Use static calls for read-only operations
+- Consider delegate calls for shared logic
+
+## Compiler Impact
+
+The Foundry configuration significantly impacts gas consumption:
+
+```toml
+optimizer = true
+optimizer_runs = 1000000
+```
+
+<Note>
+  The optimizer is configured for 1,000,000 runs, prioritizing execution gas costs over deployment costs. Adjust this value if your use case differs.
+</Note>
+
+## Continuous Monitoring
+
+Integrate benchmarking into your development workflow:
+
+1. **Pre-commit**: Run quick benchmarks on critical paths
+2. **Pull requests**: Compare against base branch
+3. **CI/CD**: Automated benchmark regression testing
+4. **Release**: Document gas costs in release notes
+
+## Troubleshooting
+
+### Inconsistent Results
+
+- Ensure consistent blockchain state
+- Rebuild contracts between runs
+- Check for system resource contention
+
+### Trace Generation Failures
+
+- Verify Hardhat configuration
+- Check node version compatibility
+- Ensure sufficient system memory
+
+### Comparison Script Issues
+
+- Verify git repository state
+- Ensure reference exists
+- Check for uncommitted changes
+
+## Next Steps
+
+- Review [testing documentation](/development/testing) for comprehensive testing strategies
+- Explore [contract architecture](/concepts/architecture) to understand gas optimization opportunities
+- Check [deployment guidelines](/deployment/networks) for production considerations

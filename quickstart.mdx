@@ -1,80 +1,240 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Create and sign your first CoW Protocol order in minutes
 ---
 
-## Get started in three steps
+## Create your first order
 
-Get your documentation site running locally and make your first customization.
+This guide walks you through creating and signing a CoW Protocol order using the TypeScript SDK.
 
-### Step 1: Set up your local environment
+## Prerequisites
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+Make sure you have:
 
-### Step 2: Deploy your changes
+- Installed `@cowprotocol/contracts` and `ethers@^5.4.0` ([see installation](/installation))
+- A wallet or signer (private key, mnemonic, or provider-connected signer)
+- Token addresses for the tokens you want to trade
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+## Setup
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+First, import the required functions and types:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+```typescript
+import { ethers } from "ethers";
+import {
+  domain,
+  Order,
+  OrderKind,
+  OrderBalance,
+  signOrder,
+  SigningScheme,
+  computeOrderUid,
+} from "@cowprotocol/contracts";
+```
 
-### Step 3: Go live
+## Define your order
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+Create an order object specifying what you want to trade:
+
+```typescript
+// Example: Selling 1 DAI for at least 0.0005 WETH
+const order: Order = {
+  sellToken: "0x6B175474E89094C44Da98b954EedeAC495271d0F", // DAI on mainnet
+  buyToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",  // WETH on mainnet
+  receiver: ethers.constants.AddressZero, // Optional: defaults to order owner
+  sellAmount: ethers.utils.parseEther("1"),
+  buyAmount: ethers.utils.parseEther("0.0005"),
+  validTo: Math.floor(Date.now() / 1000) + 3600, // Valid for 1 hour
+  appData: "0x0000000000000000000000000000000000000000000000000000000000000000",
+  feeAmount: "0", // Fee paid to the protocol
+  kind: OrderKind.SELL,
+  partiallyFillable: false,
+  sellTokenBalance: OrderBalance.ERC20,
+  buyTokenBalance: OrderBalance.ERC20,
+};
+```
+
+<Info>
+**Order kinds:**
+- `OrderKind.SELL`: Sell exactly `sellAmount`, receive at least `buyAmount`
+- `OrderKind.BUY`: Buy exactly `buyAmount`, spend at most `sellAmount`
+</Info>
+
+## Create the domain separator
+
+The domain separator ensures orders are valid only for a specific chain and contract:
+
+```typescript
+const chainId = 1; // Mainnet
+const settlementContract = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"; // GPv2Settlement on mainnet
+
+const domainSeparator = domain(chainId, settlementContract);
+```
+
+<Warning>
+Always use the correct settlement contract address for your target network. Using the wrong address will result in invalid signatures.
+</Warning>
+
+## Sign the order
+
+Sign the order using your wallet:
+
+<CodeGroup>
+
+```typescript Wallet
+// Using a wallet from private key
+const wallet = new ethers.Wallet("0x...");
+
+const signature = await signOrder(
+  domainSeparator,
+  order,
+  wallet,
+  SigningScheme.EIP712
+);
+
+console.log("Signature:", signature);
+// { scheme: 0, data: "0x..." }
+```
+
+```typescript Provider
+// Using a provider-connected signer (e.g., MetaMask)
+const provider = new ethers.providers.Web3Provider(window.ethereum);
+const signer = provider.getSigner();
+
+const signature = await signOrder(
+  domainSeparator,
+  order,
+  signer,
+  SigningScheme.EIP712
+);
+
+console.log("Signature:", signature);
+```
+
+</CodeGroup>
+
+## Compute the order UID
+
+Every order has a unique identifier used for tracking:
+
+```typescript
+const owner = await wallet.getAddress();
+const orderUid = computeOrderUid(domainSeparator, order, owner);
+
+console.log("Order UID:", orderUid);
+// "0x..." (56 bytes)
+```
+
+<Note>
+The order UID is derived from the order hash, owner address, and validity timestamp. It uniquely identifies the order on-chain.
+</Note>
+
+## Complete example
+
+Here's a complete working example:
+
+```typescript
+import { ethers } from "ethers";
+import {
+  domain,
+  Order,
+  OrderKind,
+  OrderBalance,
+  signOrder,
+  SigningScheme,
+  computeOrderUid,
+} from "@cowprotocol/contracts";
+
+async function createAndSignOrder() {
+  // Setup
+  const wallet = new ethers.Wallet("YOUR_PRIVATE_KEY");
+  const chainId = 1;
+  const settlementContract = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
+  
+  // Create domain
+  const domainSeparator = domain(chainId, settlementContract);
+  
+  // Define order
+  const order: Order = {
+    sellToken: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+    buyToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    receiver: ethers.constants.AddressZero,
+    sellAmount: ethers.utils.parseEther("1"),
+    buyAmount: ethers.utils.parseEther("0.0005"),
+    validTo: Math.floor(Date.now() / 1000) + 3600,
+    appData: "0x0000000000000000000000000000000000000000000000000000000000000000",
+    feeAmount: "0",
+    kind: OrderKind.SELL,
+    partiallyFillable: false,
+    sellTokenBalance: OrderBalance.ERC20,
+    buyTokenBalance: OrderBalance.ERC20,
+  };
+  
+  // Sign order
+  const signature = await signOrder(
+    domainSeparator,
+    order,
+    wallet,
+    SigningScheme.EIP712
+  );
+  
+  // Compute order UID
+  const owner = await wallet.getAddress();
+  const orderUid = computeOrderUid(domainSeparator, order, owner);
+  
+  console.log("Order created and signed successfully!");
+  console.log("Order UID:", orderUid);
+  console.log("Signature:", signature);
+  
+  return { order, signature, orderUid };
+}
+
+createAndSignOrder().catch(console.error);
+```
+
+## Signing schemes
+
+CoW Protocol supports multiple signing schemes:
+
+<Steps>
+  <Step title="EIP712 (recommended)">
+    ```typescript
+    SigningScheme.EIP712
+    ```
+    Provides the best UX with structured data visible to users in their wallet.
+  </Step>
+  
+  <Step title="ETHSIGN">
+    ```typescript
+    SigningScheme.ETHSIGN
+    ```
+    Falls back to `eth_sign` for wallets that don't support EIP-712.
+  </Step>
+  
+  <Step title="EIP1271">
+    ```typescript
+    SigningScheme.EIP1271
+    ```
+    For smart contract wallets that implement EIP-1271.
+  </Step>
+  
+  <Step title="PRESIGN">
+    ```typescript
+    SigningScheme.PRESIGN
+    ```
+    For on-chain order placement without off-chain signatures.
+  </Step>
+</Steps>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
+Now that you can create and sign orders, explore advanced features:
 
-<CardGroup cols={2}>
+- **Partially fillable orders**: Allow orders to be filled in multiple trades
+- **Balancer Vault integration**: Use internal balances for cheaper trading
+- **Settlement encoding**: Build complete settlement calldata for solvers
+- **Order cancellation**: Cancel orders on-chain when needed
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
+<Card title="View on GitHub" icon="github" href="https://github.com/cowprotocol/contracts">
+  Explore the full source code and examples
 </Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

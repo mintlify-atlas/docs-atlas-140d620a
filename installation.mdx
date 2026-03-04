@@ -1,0 +1,133 @@
+---
+title: Installation
+description: Install and set up the CoW Protocol contracts package in your project
+---
+
+## Package installation
+
+Install the `@cowprotocol/contracts` package using your preferred package manager:
+
+<CodeGroup>
+
+```bash npm
+npm install @cowprotocol/contracts
+```
+
+```bash yarn
+yarn add @cowprotocol/contracts
+```
+
+```bash pnpm
+pnpm add @cowprotocol/contracts
+```
+
+</CodeGroup>
+
+## Peer dependencies
+
+The package requires `ethers` version 5.4.0 or higher as a peer dependency. Install it if you haven't already:
+
+<CodeGroup>
+
+```bash npm
+npm install ethers@^5.4.0
+```
+
+```bash yarn
+yarn add ethers@^5.4.0
+```
+
+```bash pnpm
+pnpm add ethers@^5.4.0
+```
+
+</CodeGroup>
+
+<Warning>
+The package is designed for ethers v5. Compatibility with ethers v6 is not guaranteed.
+</Warning>
+
+## Basic setup
+
+Once installed, you can import the SDK utilities in your TypeScript or JavaScript project:
+
+```typescript
+import {
+  domain,
+  Order,
+  OrderKind,
+  OrderBalance,
+  signOrder,
+  SigningScheme,
+} from "@cowprotocol/contracts";
+```
+
+## TypeScript support
+
+The package includes full TypeScript type definitions. When using TypeScript, you'll get auto-completion and type checking for all SDK functions:
+
+```typescript
+import { Order, OrderKind } from "@cowprotocol/contracts";
+
+const order: Order = {
+  sellToken: "0x...",
+  buyToken: "0x...",
+  sellAmount: "1000000000000000000",
+  buyAmount: "2000000000000000000",
+  validTo: Math.floor(Date.now() / 1000) + 3600,
+  appData: "0x0000000000000000000000000000000000000000000000000000000000000000",
+  feeAmount: "0",
+  kind: OrderKind.SELL,
+  partiallyFillable: false,
+};
+```
+
+## Contract artifacts
+
+The package also includes compiled contract artifacts and deployment information:
+
+```typescript
+import { deployments } from "@cowprotocol/contracts";
+
+// Access deployed contract addresses
+const networks = require("@cowprotocol/contracts/networks.json");
+```
+
+## Building from source
+
+If you want to build the package from source:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/cowprotocol/contracts.git
+    cd contracts
+    ```
+  </Step>
+  
+  <Step title="Install dependencies">
+    ```bash
+    yarn install
+    ```
+  </Step>
+  
+  <Step title="Build the project">
+    ```bash
+    yarn build
+    ```
+    
+    This compiles both Solidity contracts and TypeScript SDK.
+  </Step>
+</Steps>
+
+<Info>
+The build process generates both CommonJS and ESM modules for maximum compatibility.
+</Info>
+
+## Next steps
+
+Now that you have the package installed, learn how to create and sign your first order:
+
+<Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+  Create and sign a CoW Protocol order
+</Card>

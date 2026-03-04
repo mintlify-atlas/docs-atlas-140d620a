@@ -1,0 +1,430 @@
+---
+title: 'GPv2VaultRelayer Contract'
+description: 'Specialized relayer for secure Balancer Vault interactions on behalf of users'
+---
+
+## Overview
+
+The `GPv2VaultRelayer` contract acts as an intermediary between the settlement contract and Balancer Vault. It provides a secure, restricted interface for token transfers and batch swaps, ensuring that only the settlement contract (its creator) can interact with user funds.
+
+```solidity
+contract GPv2VaultRelayer {
+    using GPv2Transfer for IVault;
+    // Implementation
+}
+```
+
+**Source**: `src/contracts/GPv2VaultRelayer.sol`  
+**License**: LGPL-3.0-or-later  
+**Solidity**: `>=0.7.6 <0.9.0`
+
+## Purpose
+
+The vault relayer serves several critical functions:
+
+<CardGroup cols={2}>
+  <Card title="Access Control" icon="lock">
+    Ensures only the settlement contract can execute transfers
+  </Card>
+
+  <Card title="Vault Integration" icon="plug">
+    Provides a clean interface to Balancer Vault functionality
+  </Card>
+
+  <Card title="Fee Collection" icon="coins">
+    Handles protocol fee transfers during swap execution
+  </Card>
+
+  <Card title="User Protection" icon="shield">
+    Isolates user approvals from arbitrary interactions
+  </Card>
+</CardGroup>
+
+## Contract State
+
+### Immutable Variables
+
+<ParamField path="creator" type="address" default="private">
+  The address that created this contract (the settlement contract). This value is set at creation time and cannot change. Only the creator can call the relayer's functions.
+</ParamField>
+
+<ParamField path="vault" type="IVault" default="private">
+  The Balancer Vault instance this relayer interacts with. Set during construction and immutable.
+</ParamField>
+
+```solidity
+address private immutable creator;
+IVault private immutable vault;
+```
+
+## Constructor
+
+Initializes the vault relayer with a Balancer Vault instance.
+
+```solidity
+constructor(IVault vault_) {
+    creator = msg.sender;
+    vault = vault_;
+}
+```
+
+<ParamField path="vault_" type="IVault" required>
+  The Balancer Vault contract to interact with
+</ParamField>
+
+<Note>
+  The creator is automatically set to `msg.sender` (the settlement contract) and cannot be changed.
+</Note>
+
+## Modifiers
+
+### onlyCreator
+
+Ensures a function can only be called by the contract creator.
+
+```solidity
+modifier onlyCreator() {
+    require(msg.sender == creator, "GPv2: not creator");
+    _;
+}
+```
+
+This modifier protects all external functions, ensuring that:
+- Only the settlement contract can initiate transfers
+- User approvals to the vault relayer are safe from arbitrary calls
+- The relayer cannot be abused by external actors
+
+## Functions
+
+### transferFromAccounts
+
+Transfers all sell amounts for executed trades from their owners to the caller (settlement contract).
+
+```solidity
+function transferFromAccounts(
+    GPv2Transfer.Data[] calldata transfers
+) external onlyCreator
+```
+
+<ParamField path="transfers" type="GPv2Transfer.Data[]" required>
+  Array of transfer data specifying tokens, amounts, accounts, and balance types to transfer.
+</ParamField>
+
+#### Transfer Data Structure
+
+Each `GPv2Transfer.Data` contains:
+
+```solidity
+struct Data {
+    address account;      // User account to transfer from
+    IERC20 token;        // Token to transfer
+    uint256 amount;      // Amount to transfer
+    bytes32 balance;     // Balance type (ERC20, EXTERNAL, INTERNAL)
+}
+```
+
+#### Process Flow
+
+1. Validates caller is the creator (settlement contract)
+2. Calls `vault.transferFromAccounts()` with the transfer array
+3. Tokens are transferred to `msg.sender` (the settlement contract)
+
+```solidity
+vault.transferFromAccounts(transfers, msg.sender);
+```
+
+<Warning>
+  This function reverts if:
+  - The caller is not the creator
+  - Any ERC20 transfer fails (insufficient balance or allowance)
+  - The Vault transfer operation fails
+</Warning>
+
+#### Balance Types
+
+The relayer supports three balance types:
+
+<AccordionGroup>
+  <Accordion title="ERC20 Balance">
+    Standard ERC20 token balance. Requires user approval to the Vault Relayer.
+    
+    ```solidity
+    bytes32 constant BALANCE_ERC20 = keccak256("erc20");
+    ```
+  </Accordion>
+
+  <Accordion title="External Balance">
+    Balancer Vault external balance. Allows reusing Vault ERC20 approvals without additional approvals.
+    
+    ```solidity
+    bytes32 constant BALANCE_EXTERNAL = keccak256("external");
+    ```
+  </Accordion>
+
+  <Accordion title="Internal Balance">
+    Balancer Vault internal balance. Most gas-efficient option for users with funds in the Vault.
+    
+    ```solidity
+    bytes32 constant BALANCE_INTERNAL = keccak256("internal");
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### batchSwapWithFee
+
+Performs a Balancer batch swap on behalf of a user and sends a protocol fee to the caller.
+
+```solidity
+function batchSwapWithFee(
+    IVault.SwapKind kind,
+    IVault.BatchSwapStep[] calldata swaps,
+    IERC20[] memory tokens,
+    IVault.FundManagement memory funds,
+    int256[] memory limits,
+    uint256 deadline,
+    GPv2Transfer.Data calldata feeTransfer
+) external onlyCreator returns (int256[] memory tokenDeltas)
+```
+
+<ParamField path="kind" type="IVault.SwapKind" required>
+  The Balancer swap kind: `GIVEN_IN` for sell orders or `GIVEN_OUT` for buy orders.
+</ParamField>
+
+<ParamField path="swaps" type="IVault.BatchSwapStep[]" required>
+  Array of swap steps to perform in sequence.
+</ParamField>
+
+<ParamField path="tokens" type="IERC20[]" required>
+  Array of tokens involved in the swaps. Swap steps encode tokens as indices into this array.
+</ParamField>
+
+<ParamField path="funds" type="IVault.FundManagement" required>
+  Fund management settings specifying the user and recipient of the swap.
+</ParamField>
+
+<ParamField path="limits" type="int256[]" required>
+  Swap limits for encoding limit prices. Positive values are maximums for tokens sent, negative for tokens received.
+</ParamField>
+
+<ParamField path="deadline" type="uint256" required>
+  The deadline timestamp for the swap. Ensures expired orders cannot be executed.
+</ParamField>
+
+<ParamField path="feeTransfer" type="GPv2Transfer.Data" required>
+  Transfer data for the protocol fee to be collected from the user.
+</ParamField>
+
+<ParamField path="tokenDeltas" type="int256[]" returns>
+  The executed swap amounts for each token. Positive values indicate tokens sent, negative values indicate tokens received.
+</ParamField>
+
+#### Execution Process
+
+1. Execute the batch swap through Balancer Vault
+2. Transfer the protocol fee from the user to the settlement contract
+3. Return the token deltas from the swap
+
+```solidity
+tokenDeltas = vault.batchSwap(
+    kind,
+    swaps,
+    tokens,
+    funds,
+    limits,
+    deadline
+);
+vault.fastTransferFromAccount(feeTransfer, msg.sender);
+```
+
+<Warning>
+  This function reverts if:
+  - The caller is not the creator
+  - The swap fails (limit price not met, insufficient balance, etc.)
+  - The fee transfer fails
+  - The deadline has passed
+</Warning>
+
+## Balancer Vault Integration
+
+### Fund Management
+
+The `FundManagement` struct controls where tokens come from and go to:
+
+```solidity
+struct FundManagement {
+    address sender;              // User whose tokens are being swapped
+    bool fromInternalBalance;    // Use Vault internal balance for input
+    address payable recipient;   // Recipient of output tokens
+    bool toInternalBalance;      // Send output to Vault internal balance
+}
+```
+
+### Swap Kinds
+
+<CardGroup cols={2}>
+  <Card title="GIVEN_IN" icon="arrow-right">
+    Sell orders: exact input amount, minimum output
+  </Card>
+  
+  <Card title="GIVEN_OUT" icon="arrow-left">
+    Buy orders: exact output amount, maximum input
+  </Card>
+</CardGroup>
+
+## Usage Examples
+
+### Transfer Tokens
+
+<CodeGroup>
+```solidity Basic Transfer
+// From settlement contract
+GPv2Transfer.Data[] memory transfers = new GPv2Transfer.Data[](1);
+transfers[0] = GPv2Transfer.Data({
+    account: userAddress,
+    token: IERC20(wethAddress),
+    amount: 1 ether,
+    balance: GPv2Order.BALANCE_ERC20
+});
+
+vaultRelayer.transferFromAccounts(transfers);
+```
+
+```solidity Multiple Transfers
+// From settlement contract - batch multiple users
+GPv2Transfer.Data[] memory transfers = new GPv2Transfer.Data[](3);
+
+transfers[0] = GPv2Transfer.Data({
+    account: user1,
+    token: IERC20(wethAddress),
+    amount: 1 ether,
+    balance: GPv2Order.BALANCE_ERC20
+});
+
+transfers[1] = GPv2Transfer.Data({
+    account: user2,
+    token: IERC20(usdcAddress),
+    amount: 1000e6,
+    balance: GPv2Order.BALANCE_INTERNAL
+});
+
+transfers[2] = GPv2Transfer.Data({
+    account: user3,
+    token: IERC20(daiAddress),
+    amount: 500e18,
+    balance: GPv2Order.BALANCE_EXTERNAL
+});
+
+vaultRelayer.transferFromAccounts(transfers);
+```
+</CodeGroup>
+
+### Execute Swap with Fee
+
+```solidity
+// From settlement contract
+IVault.SwapKind kind = IVault.SwapKind.GIVEN_IN;
+
+IVault.BatchSwapStep[] memory swaps = new IVault.BatchSwapStep[](1);
+swaps[0] = IVault.BatchSwapStep({
+    poolId: balancerPoolId,
+    assetInIndex: 0,  // WETH
+    assetOutIndex: 1, // USDC
+    amount: 1 ether,
+    userData: ""
+});
+
+IERC20[] memory tokens = [IERC20(wethAddress), IERC20(usdcAddress)];
+
+IVault.FundManagement memory funds = IVault.FundManagement({
+    sender: userAddress,
+    fromInternalBalance: false,
+    recipient: payable(userAddress),
+    toInternalBalance: false
+});
+
+int256[] memory limits = new int256[](2);
+limits[0] = 1 ether;     // Max WETH to send
+limits[1] = -1500e6;     // Min USDC to receive
+
+GPv2Transfer.Data memory feeTransfer = GPv2Transfer.Data({
+    account: userAddress,
+    token: IERC20(wethAddress),
+    amount: 0.003 ether, // Protocol fee
+    balance: GPv2Order.BALANCE_ERC20
+});
+
+int256[] memory deltas = vaultRelayer.batchSwapWithFee(
+    kind,
+    swaps,
+    tokens,
+    funds,
+    limits,
+    block.timestamp + 600, // 10 minute deadline
+    feeTransfer
+);
+```
+
+## Security Features
+
+<AccordionGroup>
+  <Accordion title="Creator-Only Access">
+    All external functions require `onlyCreator` modifier, ensuring only the settlement contract can call them.
+  </Accordion>
+
+  <Accordion title="Immutable References">
+    Both `creator` and `vault` are immutable, preventing any changes to critical contract state.
+  </Accordion>
+
+  <Accordion title="No Direct User Interaction">
+    Users never call the vault relayer directly. All interactions are mediated through the settlement contract.
+  </Accordion>
+
+  <Accordion title="Approval Isolation">
+    User approvals to the vault relayer are protected because only the settlement contract can initiate transfers.
+  </Accordion>
+</AccordionGroup>
+
+## Gas Optimization
+
+The vault relayer is designed for gas efficiency:
+
+- Uses `immutable` variables for creator and vault (no SLOAD costs)
+- Delegates complex logic to Balancer Vault
+- Minimal state storage
+- Direct assembly in GPv2Transfer library for optimal performance
+
+## Integration with Settlement
+
+The settlement contract uses the vault relayer in two key places:
+
+### During Batch Settlement
+
+```solidity
+// Transfer tokens from all users
+vaultRelayer.transferFromAccounts(inTransfers);
+
+// Execute trades
+executeInteractions(interactions[1]);
+
+// Transfer tokens to all recipients  
+vault.transferToAccounts(outTransfers);
+```
+
+### During Direct Swaps
+
+```solidity
+int256[] memory tokenDeltas = vaultRelayer.batchSwapWithFee(
+    kind,
+    swaps,
+    tokens,
+    funds,
+    limits,
+    order.validTo,  // Use order deadline
+    feeTransfer
+);
+```
+
+## Related Contracts
+
+- [GPv2Settlement](/contracts/settlement) - Main settlement contract that creates and uses the vault relayer
+- [GPv2Transfer Library](/contracts/libraries#gpv2transfer) - Transfer utilities used by the vault relayer

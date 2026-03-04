@@ -1,0 +1,384 @@
+---
+title: "Contract Verification"
+description: "How to verify deployed CoW Protocol smart contracts on Etherscan, Tenderly, and other block explorers"
+---
+
+Contract verification is essential for transparency and allows users to interact with deployed contracts through block explorers. This guide covers verification for both Etherscan-based explorers and Tenderly.
+
+## Prerequisites
+
+Before verifying contracts, ensure you have:
+
+- Node.js and yarn installed
+- Cloned the CoW Protocol contracts repository
+- Deployed contracts on your target network
+- Appropriate API keys for verification services
+
+## Etherscan Verification
+
+Etherscan verification works for all Etherscan-based block explorers including:
+
+- [Etherscan](https://etherscan.io) (Ethereum)
+- [Gnosisscan](https://gnosisscan.io) (Gnosis Chain)
+- [Arbiscan](https://arbiscan.io) (Arbitrum)
+- [Optimistic Etherscan](https://optimistic.etherscan.io) (Optimism)
+- [PolygonScan](https://polygonscan.com) (Polygon)
+- [BscScan](https://bscscan.com) (BSC)
+- [BaseScan](https://basescan.org) (Base)
+- [SnowTrace](https://snowtrace.io) (Avalanche)
+
+### Setup API Key
+
+First, obtain an API key from the relevant block explorer and set it as an environment variable:
+
+<CodeGroup>
+```bash Ethereum
+export ETHERSCAN_API_KEY=your_api_key_here
+```
+
+```bash Gnosis
+export GNOSISSCAN_API_KEY=your_api_key_here
+```
+
+```bash Arbitrum
+export ARBISCAN_API_KEY=your_api_key_here
+```
+
+```bash Polygon
+export POLYGONSCAN_API_KEY=your_api_key_here
+```
+</CodeGroup>
+
+<Note>
+  Most Etherscan-based explorers use the same API key variable `ETHERSCAN_API_KEY`. Check your Hardhat configuration for network-specific variable names.
+</Note>
+
+### Verify All Deployed Contracts
+
+To verify all contracts deployed on a specific network:
+
+```bash
+export ETHERSCAN_API_KEY=<Your Key>
+NETWORK='mainnet'  # or 'xdai', 'arbitrumOne', 'optimism', etc.
+yarn verify:etherscan --network $NETWORK
+```
+
+<Accordion title="Supported Network Names">
+  The following network names are recognized by the verification scripts:
+
+  - `mainnet` - Ethereum Mainnet
+  - `xdai` - Gnosis Chain
+  - `arbitrumOne` - Arbitrum One
+  - `optimism` - Optimism
+  - `polygon` - Polygon
+  - `bsc` - BNB Smart Chain
+  - `base` - Base
+  - `avalanche` - Avalanche C-Chain
+  - `sepolia` - Sepolia Testnet
+  - `goerli` - Goerli Testnet (deprecated)
+  - `rinkeby` - Rinkeby Testnet (deprecated)
+</Accordion>
+
+### Verify Individual Contracts
+
+Some contracts, like the VaultRelayer, are deployed indirectly and require manual verification with constructor arguments.
+
+#### Verify GPv2VaultRelayer
+
+The VaultRelayer contract requires the Balancer Vault address as a constructor argument:
+
+```bash
+NETWORK='mainnet'
+VAULT_RELAYER_ADDRESS='0xC92E8bdf79f0507f65a392b0ab4667716BFE0110'
+BALANCER_VAULT='0xBA12222222228d8Ba445958a75a0704d566BF2C8'
+
+npx hardhat verify --network $NETWORK $VAULT_RELAYER_ADDRESS $BALANCER_VAULT
+```
+
+<Note>
+  The Balancer Vault address (`0xBA12222222228d8Ba445958a75a0704d566BF2C8`) is consistent across most networks.
+</Note>
+
+#### Verify Custom Contracts
+
+For other contracts with constructor arguments:
+
+```bash
+npx hardhat verify --network $NETWORK CONTRACT_ADDRESS "constructor_arg_1" "constructor_arg_2"
+```
+
+### Verification Example
+
+Complete example for Ethereum mainnet:
+
+<CodeGroup>
+```bash Full Verification
+# Set network and API key
+export NETWORK='mainnet'
+export ETHERSCAN_API_KEY='ABC123...'
+
+# Verify all contracts
+yarn verify:etherscan --network $NETWORK
+
+# Manually verify VaultRelayer if needed
+npx hardhat verify --network $NETWORK \
+  0xC92E8bdf79f0507f65a392b0ab4667716BFE0110 \
+  0xBA12222222228d8Ba445958a75a0704d566BF2C8
+```
+
+```bash With Gas Price
+# For networks requiring specific gas price
+export NETWORK='mainnet'
+export GAS_PRICE_WEI='50000000000'
+export ETHERSCAN_API_KEY='ABC123...'
+
+yarn verify:etherscan --network $NETWORK --gasprice $GAS_PRICE_WEI
+```
+</CodeGroup>
+
+## Tenderly Verification
+
+Tenderly provides advanced debugging and monitoring capabilities. Verify contracts on Tenderly for enhanced development experience.
+
+### Setup Tenderly
+
+First, configure Tenderly credentials:
+
+```bash
+# Login to Tenderly CLI
+tenderly login
+
+# Or set credentials directly
+export TENDERLY_USERNAME=your_username
+export TENDERLY_PROJECT=your_project
+```
+
+### Verify All Contracts
+
+Verify all deployed contracts on a network:
+
+```bash
+NETWORK='mainnet'
+yarn verify:tenderly --network $NETWORK
+```
+
+### Verify Individual Contract
+
+Verify a specific contract by name and address:
+
+```bash
+NETWORK='mainnet'
+CONTRACT_NAME='GPv2Settlement'
+CONTRACT_ADDRESS='0x9008D19f58AAbD9eD0D60971565AA8510560ab41'
+
+npx hardhat tenderly:verify --network $NETWORK $CONTRACT_NAME=$CONTRACT_ADDRESS
+```
+
+<Accordion title="Common Contract Names">
+  Use these contract names when verifying on Tenderly:
+
+  - `GPv2Settlement`
+  - `GPv2AllowListAuthentication`
+  - `GPv2VaultRelayer`
+  - `GPv2AllowListAuthentication_Implementation`
+  - `GPv2AllowListAuthentication_Proxy`
+</Accordion>
+
+### Verify Multiple Contracts
+
+You can verify multiple contracts in a single command:
+
+```bash
+npx hardhat tenderly:verify --network $NETWORK \
+  GPv2Settlement=0x9008D19f58AAbD9eD0D60971565AA8510560ab41 \
+  GPv2AllowListAuthentication=0x2c4c28DDBdAc9C5E7055b4C863b72eA0149D8aFE
+```
+
+## Verification Best Practices
+
+<Warning>
+  **Important Considerations:**
+
+  1. Always verify contracts immediately after deployment
+  2. Keep deployment artifacts in version control
+  3. Document constructor arguments for manual verification
+  4. Verify on multiple explorers for redundancy
+  5. Test verification scripts before mainnet deployment
+</Warning>
+
+### Verification Checklist
+
+Before considering verification complete:
+
+- [ ] All core contracts verified on primary block explorer
+- [ ] VaultRelayer contract manually verified with correct constructor args
+- [ ] Proxy and implementation contracts both verified
+- [ ] Contract source code matches repository
+- [ ] Compiler version and settings are correct
+- [ ] Constructor arguments are properly encoded
+- [ ] Verification status visible on block explorer
+
+## Troubleshooting
+
+### Common Issues
+
+<Accordion title="Error: Already Verified">
+  If a contract is already verified, you'll see an error message. This is normal and means the contract is already accessible on the block explorer.
+
+  ```bash
+  Error: Contract source code already verified
+  ```
+
+  No action needed - the contract is already verified.
+</Accordion>
+
+<Accordion title="Error: Constructor Arguments">
+  If verification fails due to constructor arguments:
+
+  ```bash
+  Error: Missing constructor arguments
+  ```
+
+  **Solution:**
+  1. Find the deployment transaction on the block explorer
+  2. Extract constructor arguments from the transaction input data
+  3. Provide them explicitly to the verify command
+
+  For GPv2Settlement, constructor arguments are:
+  ```javascript
+  [
+    "0x2c4c28DDBdAc9C5E7055b4C863b72eA0149D8aFE", // authenticator
+    "0xBA12222222228d8Ba445958a75a0704d566BF2C8"  // vault
+  ]
+  ```
+</Accordion>
+
+<Accordion title="Error: Invalid API Key">
+  If you see an API key error:
+
+  ```bash
+  Error: Invalid API Key
+  ```
+
+  **Solution:**
+  1. Verify your API key is correct
+  2. Ensure environment variable is properly set
+  3. Check API key has not expired
+  4. Confirm API key is for the correct network
+</Accordion>
+
+<Accordion title="Error: Network Not Supported">
+  If the network is not recognized:
+
+  ```bash
+  Error: Network not found
+  ```
+
+  **Solution:**
+  1. Check `hardhat.config.ts` for supported networks
+  2. Ensure network name matches configuration
+  3. Verify RPC URL is accessible
+  4. Check network is supported by the block explorer
+</Accordion>
+
+## Automated Verification Pipeline
+
+For CI/CD integration, create a verification script:
+
+<CodeGroup>
+```bash verify.sh
+#!/bin/bash
+
+set -e
+
+NETWORK=${1:-"mainnet"}
+ETHERSCAN_API_KEY=${2}
+
+if [ -z "$ETHERSCAN_API_KEY" ]; then
+  echo "Error: ETHERSCAN_API_KEY not provided"
+  exit 1
+fi
+
+echo "Verifying contracts on $NETWORK..."
+
+# Verify all contracts
+yarn verify:etherscan --network $NETWORK
+
+# Verify VaultRelayer separately
+echo "Verifying VaultRelayer..."
+npx hardhat verify --network $NETWORK \
+  0xC92E8bdf79f0507f65a392b0ab4667716BFE0110 \
+  0xBA12222222228d8Ba445958a75a0704d566BF2C8
+
+echo "Verification complete!"
+```
+
+```yaml GitHub Actions
+name: Verify Contracts
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: 'Network to verify'
+        required: true
+        default: 'mainnet'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Install dependencies
+        run: yarn install
+      
+      - name: Verify contracts
+        env:
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+        run: |
+          yarn verify:etherscan --network ${{ github.event.inputs.network }}
+```
+</CodeGroup>
+
+## Verification Status
+
+Check verification status programmatically:
+
+```javascript
+const { ethers } = require('ethers');
+const provider = new ethers.providers.EtherscanProvider(
+  'mainnet',
+  process.env.ETHERSCAN_API_KEY
+);
+
+async function checkVerification(address) {
+  try {
+    const code = await provider.getCode(address);
+    console.log('Contract deployed:', code !== '0x');
+    
+    // Check on Etherscan API
+    const url = `https://api.etherscan.io/api?module=contract&action=getsourcecode&address=${address}&apikey=${process.env.ETHERSCAN_API_KEY}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    console.log('Verified:', data.result[0].SourceCode !== '');
+  } catch (error) {
+    console.error('Error:', error.message);
+  }
+}
+
+checkVerification('0x9008D19f58AAbD9eD0D60971565AA8510560ab41');
+```
+
+## Additional Resources
+
+- [Hardhat Verification Plugin](https://hardhat.org/hardhat-runner/plugins/nomiclabs-hardhat-etherscan)
+- [Tenderly Documentation](https://docs.tenderly.co/)
+- [Etherscan API Documentation](https://docs.etherscan.io/)
+- [Contract Deployment Guide](/deployment/networks)

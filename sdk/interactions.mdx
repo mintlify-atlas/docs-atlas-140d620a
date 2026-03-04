@@ -1,0 +1,556 @@
+---
+title: "Interactions"
+description: "Create and manage settlement interactions with the CoW Protocol SDK"
+---
+
+## Overview
+
+Interactions allow settlements to execute arbitrary smart contract calls at specific stages during settlement execution. This enables advanced functionality like:
+
+- EIP-2612 permit calls for gasless approvals
+- AMM trades to source liquidity
+- Token wrapping/unwrapping
+- Protocol integrations
+- Post-settlement cleanup
+
+## Interaction Interface
+
+The core interaction data structure:
+
+```typescript
+export interface Interaction {
+  target: string;        // Smart contract address to call
+  value: BigNumberish;   // ETH value to send (in wei)
+  callData: BytesLike;   // Encoded function call
+}
+```
+
+<ParamField path="target" type="string" required>
+  The address of the smart contract to interact with. Must be a valid Ethereum address.
+</ParamField>
+
+<ParamField path="value" type="BigNumberish" required>
+  The amount of ETH to send with the call (in wei). Set to `0` for calls that don't require ETH.
+</ParamField>
+
+<ParamField path="callData" type="BytesLike" required>
+  The encoded function call data. Use ethers.js `Interface.encodeFunctionData()` to generate this.
+</ParamField>
+
+## InteractionLike Type
+
+A convenience type that makes `value` and `callData` optional:
+
+```typescript
+export type InteractionLike = Pick<Interaction, "target"> & Partial<Interaction>;
+```
+
+When using `InteractionLike`, omitted fields default to:
+- `value`: `0`
+- `callData`: `"0x"`
+
+## Interaction Stages
+
+Interactions are executed at specific stages during settlement:
+
+```typescript
+export enum InteractionStage {
+  PRE = 0,    // Before any trading
+  INTRA = 1,  // During trading (after sells, before buys)
+  POST = 2,   // After all trading
+}
+```
+
+### Stage Details
+
+<Tabs>
+  <Tab title="PRE">
+    **Pre-settlement interactions** execute before any token transfers occur.
+    
+    **Use cases:**
+    - EIP-2612 permit calls for gasless approvals
+    - Setting up allowances
+    - Token wrapping (e.g., ETH → WETH)
+    - Pre-trade state initialization
+    
+    **Example:**
+    ```typescript
+    import { InteractionStage } from "@cowprotocol/contracts";
+    
+    encoder.encodeInteraction(
+      {
+        target: tokenAddress,
+        callData: tokenInterface.encodeFunctionData("permit", [
+          owner,
+          spender,
+          value,
+          deadline,
+          v,
+          r,
+          s,
+        ]),
+      },
+      InteractionStage.PRE
+    );
+    ```
+  </Tab>
+  
+  <Tab title="INTRA">
+    **Intra-settlement interactions** execute during trading, after sell token transfers but before buy token transfers.
+    
+    **Use cases:**
+    - AMM swaps (Uniswap, Sushiswap, Curve, etc.)
+    - Liquidity pool interactions
+    - Complex trade routing
+    - Aggregator calls
+    
+    **Example:**
+    ```typescript
+    import { InteractionStage } from "@cowprotocol/contracts";
+    
+    // Swap on Uniswap during settlement
+    encoder.encodeInteraction(
+      {
+        target: uniswapRouter,
+        callData: routerInterface.encodeFunctionData("swapExactTokensForTokens", [
+          amountIn,
+          amountOutMin,
+          path,
+          settlementContract,
+          deadline,
+        ]),
+      },
+      InteractionStage.INTRA
+    );
+    ```
+  </Tab>
+  
+  <Tab title="POST">
+    **Post-settlement interactions** execute after all trading is complete.
+    
+    **Use cases:**
+    - Token unwrapping (e.g., WETH → ETH)
+    - Fee distributions
+    - Storage cleanup for gas refunds
+    - Post-trade state updates
+    
+    **Example:**
+    ```typescript
+    import { InteractionStage } from "@cowprotocol/contracts";
+    
+    // Unwrap WETH to ETH after trading
+    encoder.encodeInteraction(
+      {
+        target: wethAddress,
+        callData: wethInterface.encodeFunctionData("withdraw", [amount]),
+      },
+      InteractionStage.POST
+    );
+    ```
+  </Tab>
+</Tabs>
+
+## Helper Functions
+
+### normalizeInteraction
+
+Normalizes an `InteractionLike` to a full `Interaction`:
+
+```typescript
+export function normalizeInteraction(
+  interaction: InteractionLike
+): Interaction
+```
+
+Sets default values:
+- `value`: `0` if not specified
+- `callData`: `"0x"` if not specified
+
+<CodeGroup>
+```typescript Example
+import { normalizeInteraction } from "@cowprotocol/contracts";
+
+const interaction = normalizeInteraction({
+  target: "0x1234567890123456789012345678901234567890",
+});
+
+console.log(interaction);
+// {
+//   target: "0x1234567890123456789012345678901234567890",
+//   value: 0,
+//   callData: "0x"
+// }
+```
+</CodeGroup>
+
+### normalizeInteractions
+
+Normalizes an array of interactions:
+
+```typescript
+export function normalizeInteractions(
+  interactions: InteractionLike[]
+): Interaction[]
+```
+
+<CodeGroup>
+```typescript Example
+import { normalizeInteractions } from "@cowprotocol/contracts";
+
+const interactions = normalizeInteractions([
+  { target: address1 },
+  { target: address2, value: ethers.utils.parseEther("1") },
+]);
+
+console.log(interactions.length); // 2
+```
+</CodeGroup>
+
+## Creating Interactions
+
+### Basic Interaction
+
+<CodeGroup>
+```typescript Simple Call
+import { ethers } from "ethers";
+
+// Create an ERC20 interface
+const erc20 = new ethers.utils.Interface([
+  "function approve(address spender, uint256 amount) returns (bool)",
+]);
+
+// Create interaction
+const interaction: Interaction = {
+  target: tokenAddress,
+  value: 0,
+  callData: erc20.encodeFunctionData("approve", [
+    spenderAddress,
+    ethers.constants.MaxUint256,
+  ]),
+};
+```
+</CodeGroup>
+
+### Interaction with ETH
+
+<CodeGroup>
+```typescript Send ETH
+import { ethers } from "ethers";
+
+const weth = new ethers.utils.Interface([
+  "function deposit() payable",
+]);
+
+// Wrap ETH to WETH
+const wrapInteraction: Interaction = {
+  target: wethAddress,
+  value: ethers.utils.parseEther("1"), // Send 1 ETH
+  callData: weth.encodeFunctionData("deposit"),
+};
+```
+</CodeGroup>
+
+## Using with SettlementEncoder
+
+### encodeInteraction
+
+Add an interaction to a settlement:
+
+```typescript
+encodeInteraction(
+  interaction: InteractionLike,
+  stage?: InteractionStage
+): void
+```
+
+<CodeGroup>
+```typescript Example
+import {
+  SettlementEncoder,
+  InteractionStage,
+  domain,
+} from "@cowprotocol/contracts";
+
+const encoder = new SettlementEncoder(domain(1, settlementContract));
+
+// Add pre-settlement interaction
+encoder.encodeInteraction(
+  {
+    target: tokenAddress,
+    callData: permitCallData,
+  },
+  InteractionStage.PRE
+);
+
+// Add intra-settlement interaction (default)
+encoder.encodeInteraction({
+  target: uniswapRouter,
+  callData: swapCallData,
+});
+
+// Add post-settlement interaction
+encoder.encodeInteraction(
+  {
+    target: wethAddress,
+    callData: withdrawCallData,
+  },
+  InteractionStage.POST
+);
+```
+</CodeGroup>
+
+<Note>
+  If no stage is specified, `InteractionStage.INTRA` is used by default.
+</Note>
+
+## Common Use Cases
+
+### EIP-2612 Permit
+
+<CodeGroup>
+```typescript Permit Interaction
+import { ethers } from "ethers";
+import { InteractionStage } from "@cowprotocol/contracts";
+
+// Create permit signature (off-chain)
+const erc20Permit = new ethers.utils.Interface([
+  "function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)",
+]);
+
+// ... generate permit signature with wallet.signTypedData ...
+
+// Add permit as pre-interaction
+encoder.encodeInteraction(
+  {
+    target: tokenAddress,
+    callData: erc20Permit.encodeFunctionData("permit", [
+      ownerAddress,
+      vaultRelayer,
+      ethers.constants.MaxUint256,
+      deadline,
+      v,
+      r,
+      s,
+    ]),
+  },
+  InteractionStage.PRE
+);
+```
+</CodeGroup>
+
+### Uniswap V2 Swap
+
+<CodeGroup>
+```typescript Uniswap Interaction
+import { ethers } from "ethers";
+import { InteractionStage } from "@cowprotocol/contracts";
+
+const uniswapRouter = new ethers.utils.Interface([
+  "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) returns (uint[] memory amounts)",
+]);
+
+const path = [tokenIn, tokenOut];
+const deadline = Math.floor(Date.now() / 1000) + 3600;
+
+encoder.encodeInteraction(
+  {
+    target: uniswapRouterAddress,
+    callData: uniswapRouter.encodeFunctionData("swapExactTokensForTokens", [
+      amountIn,
+      amountOutMin,
+      path,
+      settlementContract, // Settlement receives the output
+      deadline,
+    ]),
+  },
+  InteractionStage.INTRA
+);
+```
+</CodeGroup>
+
+### WETH Wrap/Unwrap
+
+<CodeGroup>
+```typescript WETH Interactions
+import { ethers } from "ethers";
+import { InteractionStage } from "@cowprotocol/contracts";
+
+const weth = new ethers.utils.Interface([
+  "function deposit() payable",
+  "function withdraw(uint256 amount)",
+]);
+
+// Wrap ETH to WETH (pre-settlement)
+encoder.encodeInteraction(
+  {
+    target: wethAddress,
+    value: ethers.utils.parseEther("1"),
+    callData: weth.encodeFunctionData("deposit"),
+  },
+  InteractionStage.PRE
+);
+
+// Unwrap WETH to ETH (post-settlement)
+encoder.encodeInteraction(
+  {
+    target: wethAddress,
+    callData: weth.encodeFunctionData("withdraw", [
+      ethers.utils.parseEther("1"),
+    ]),
+  },
+  InteractionStage.POST
+);
+```
+</CodeGroup>
+
+### Curve Pool Swap
+
+<CodeGroup>
+```typescript Curve Interaction
+import { ethers } from "ethers";
+import { InteractionStage } from "@cowprotocol/contracts";
+
+const curvePool = new ethers.utils.Interface([
+  "function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) returns (uint256)",
+]);
+
+// Swap on Curve
+encoder.encodeInteraction(
+  {
+    target: curvePoolAddress,
+    callData: curvePool.encodeFunctionData("exchange", [
+      0, // Index of coin to send
+      1, // Index of coin to receive
+      amountIn,
+      minAmountOut,
+    ]),
+  },
+  InteractionStage.INTRA
+);
+```
+</CodeGroup>
+
+## Complete Example
+
+<CodeGroup>
+```typescript Full Settlement with Interactions
+import {
+  SettlementEncoder,
+  domain,
+  Order,
+  OrderKind,
+  SigningScheme,
+  InteractionStage,
+} from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+async function createSettlementWithInteractions() {
+  const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+  const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+  const settlementContract = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
+  
+  const encoder = new SettlementEncoder(domain(1, settlementContract));
+
+  // 1. Pre-settlement: Approve tokens via permit
+  const erc20Permit = new ethers.utils.Interface([
+    "function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)",
+  ]);
+
+  encoder.encodeInteraction(
+    {
+      target: tokenAddress,
+      callData: erc20Permit.encodeFunctionData("permit", [
+        await wallet.getAddress(),
+        vaultRelayer,
+        ethers.constants.MaxUint256,
+        deadline,
+        v, r, s, // From off-chain permit signature
+      ]),
+    },
+    InteractionStage.PRE
+  );
+
+  // 2. Add user order
+  const order: Order = {
+    sellToken: daiAddress,
+    buyToken: usdcAddress,
+    sellAmount: ethers.utils.parseEther("1000"),
+    buyAmount: ethers.utils.parseUnits("990", 6),
+    validTo: Math.floor(Date.now() / 1000) + 3600,
+    appData: 0,
+    feeAmount: ethers.utils.parseEther("1"),
+    kind: OrderKind.SELL,
+    partiallyFillable: false,
+  };
+
+  await encoder.signEncodeTrade(order, wallet, SigningScheme.EIP712);
+
+  // 3. Intra-settlement: Source liquidity from Uniswap
+  const uniswapRouter = new ethers.utils.Interface([
+    "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) returns (uint[] memory)",
+  ]);
+
+  encoder.encodeInteraction(
+    {
+      target: uniswapRouterAddress,
+      callData: uniswapRouter.encodeFunctionData("swapExactTokensForTokens", [
+        ethers.utils.parseUnits("1000", 6), // USDC in
+        ethers.utils.parseEther("995"),      // DAI out minimum
+        [usdcAddress, daiAddress],
+        settlementContract,
+        deadline,
+      ]),
+    },
+    InteractionStage.INTRA
+  );
+
+  // 4. Define clearing prices
+  const prices = {
+    [daiAddress]: ethers.utils.parseEther("1"),
+    [usdcAddress]: ethers.utils.parseUnits("1", 18),
+  };
+
+  // 5. Generate final settlement
+  return encoder.encodedSettlement(prices);
+}
+
+const settlement = await createSettlementWithInteractions();
+const [tokens, prices, trades, [pre, intra, post]] = settlement;
+
+console.log(`Pre-interactions: ${pre.length}`);
+console.log(`Intra-interactions: ${intra.length}`);
+console.log(`Post-interactions: ${post.length}`);
+```
+</CodeGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Stage Selection" icon="stairs">
+    Choose the correct stage based on when token balances need to be available. Pre for setup, Intra for trading, Post for cleanup.
+  </Card>
+  
+  <Card title="Gas Optimization" icon="gauge-high">
+    Minimize the number of interactions and calldata size to reduce gas costs.
+  </Card>
+  
+  <Card title="Error Handling" icon="shield-exclamation">
+    Interactions that fail will cause the entire settlement to revert. Ensure all calls will succeed.
+  </Card>
+  
+  <Card title="Reentrancy" icon="arrows-rotate">
+    Be cautious of reentrancy when interactions call untrusted contracts or transfer ETH.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Settlement Encoding" icon="code" href="/sdk/settlement">
+    Learn more about encoding settlements
+  </Card>
+  
+  <Card title="Orders" icon="file-contract" href="/sdk/orders">
+    Review order creation and management
+  </Card>
+</CardGroup>

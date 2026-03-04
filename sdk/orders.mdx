@@ -1,0 +1,359 @@
+---
+title: "Orders"
+description: "Create and manage CoW Protocol orders with the TypeScript SDK"
+---
+
+## Order Interface
+
+The `Order` interface represents a Gnosis Protocol v2 order. All orders must conform to this structure for signing and settlement.
+
+```typescript
+export interface Order {
+  sellToken: string;
+  buyToken: string;
+  receiver?: string;
+  sellAmount: BigNumberish;
+  buyAmount: BigNumberish;
+  validTo: Timestamp;
+  appData: HashLike;
+  feeAmount: BigNumberish;
+  kind: OrderKind;
+  partiallyFillable: boolean;
+  sellTokenBalance?: OrderBalance;
+  buyTokenBalance?: OrderBalance;
+}
+```
+
+### Order Fields
+
+<ParamField path="sellToken" type="string" required>
+  The ERC20 token address to sell. Must be a valid Ethereum address.
+</ParamField>
+
+<ParamField path="buyToken" type="string" required>
+  The ERC20 token address to buy. Use `BUY_ETH_ADDRESS` constant to buy native ETH.
+</ParamField>
+
+<ParamField path="receiver" type="string">
+  Optional address to receive the buy tokens instead of the order owner. Defaults to `address(0)` which means the owner receives the tokens.
+</ParamField>
+
+<ParamField path="sellAmount" type="BigNumberish" required>
+  The amount of sell tokens.
+  
+  - **Sell orders**: Exact amount to sell
+  - **Buy orders**: Maximum amount to sell
+  - **Partial fill**: Component of the limit price fraction
+</ParamField>
+
+<ParamField path="buyAmount" type="BigNumberish" required>
+  The amount of buy tokens.
+  
+  - **Sell orders**: Minimum amount to buy
+  - **Buy orders**: Exact amount to buy
+  - **Partial fill**: Component of the limit price fraction
+</ParamField>
+
+<ParamField path="validTo" type="Timestamp" required>
+  Unix timestamp (or Date object) when the order expires. Orders cannot be executed after this time.
+</ParamField>
+
+<ParamField path="appData" type="HashLike" required>
+  Application-specific data as a 32-byte hash or number. Can be used for:
+  - Adding metadata to orders
+  - Ensuring uniqueness between otherwise identical orders
+  - Storing protocol-specific information
+</ParamField>
+
+<ParamField path="feeAmount" type="BigNumberish" required>
+  Fee amount in sell tokens to pay to the protocol.
+</ParamField>
+
+<ParamField path="kind" type="OrderKind" required>
+  The order type: `OrderKind.SELL` or `OrderKind.BUY`.
+</ParamField>
+
+<ParamField path="partiallyFillable" type="boolean" required>
+  Whether the order can be partially filled across multiple settlements.
+</ParamField>
+
+<ParamField path="sellTokenBalance" type="OrderBalance">
+  How sell tokens are withdrawn. Defaults to `OrderBalance.ERC20`.
+</ParamField>
+
+<ParamField path="buyTokenBalance" type="OrderBalance">
+  How buy tokens are received. Defaults to `OrderBalance.ERC20`.
+</ParamField>
+
+## Enums
+
+### OrderKind
+
+Defines whether an order is a sell or buy order:
+
+```typescript
+export enum OrderKind {
+  SELL = "sell",  // Sell exact sellAmount
+  BUY = "buy",    // Buy exact buyAmount
+}
+```
+
+<Tabs>
+  <Tab title="Sell Order">
+    A sell order specifies an exact `sellAmount` to trade and a minimum `buyAmount` to receive.
+    
+    ```typescript
+    const sellOrder: Order = {
+      sellToken: WETH_ADDRESS,
+      buyToken: USDC_ADDRESS,
+      sellAmount: ethers.utils.parseEther("1"),      // Sell exactly 1 WETH
+      buyAmount: ethers.utils.parseUnits("3000", 6), // Get at least 3000 USDC
+      kind: OrderKind.SELL,
+      // ... other fields
+    };
+    ```
+  </Tab>
+  
+  <Tab title="Buy Order">
+    A buy order specifies an exact `buyAmount` to receive and a maximum `sellAmount` to spend.
+    
+    ```typescript
+    const buyOrder: Order = {
+      sellToken: WETH_ADDRESS,
+      buyToken: USDC_ADDRESS,
+      sellAmount: ethers.utils.parseEther("1.1"),    // Spend at most 1.1 WETH
+      buyAmount: ethers.utils.parseUnits("3000", 6), // Buy exactly 3000 USDC
+      kind: OrderKind.BUY,
+      // ... other fields
+    };
+    ```
+  </Tab>
+</Tabs>
+
+### OrderBalance
+
+Specifies how token balances are managed:
+
+```typescript
+export enum OrderBalance {
+  ERC20 = "erc20",        // Standard ERC20 transfers
+  EXTERNAL = "external",  // Balancer Vault external balances (sell only)
+  INTERNAL = "internal",  // Balancer Vault internal balances
+}
+```
+
+<ParamField path="OrderBalance.ERC20" type="string">
+  Use standard ERC20 token balances with `transferFrom`. Requires ERC20 allowance to the Vault relayer.
+</ParamField>
+
+<ParamField path="OrderBalance.EXTERNAL" type="string">
+  Use Balancer Vault external balances. Only valid for `sellTokenBalance`. Allows reusing Vault ERC20 allowances.
+</ParamField>
+
+<ParamField path="OrderBalance.INTERNAL" type="string">
+  Use Balancer Vault internal balances for trading without token transfers.
+</ParamField>
+
+## Helper Functions
+
+### normalizeOrder
+
+Normalizes an order for EIP-712 signing:
+
+```typescript
+export function normalizeOrder(order: Order): NormalizedOrder
+```
+
+<CodeGroup>
+```typescript Example
+import { normalizeOrder } from "@cowprotocol/contracts";
+
+const order: Order = {
+  sellToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  buyToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  sellAmount: ethers.utils.parseEther("1"),
+  buyAmount: ethers.utils.parseUnits("3000", 6),
+  validTo: new Date(Date.now() + 3600000), // Date object
+  appData: 42, // Number
+  feeAmount: 0,
+  kind: OrderKind.SELL,
+  partiallyFillable: false,
+};
+
+const normalized = normalizeOrder(order);
+// normalized.validTo is now a Unix timestamp number
+// normalized.appData is now a 32-byte hex string
+// normalized.receiver is now address(0)
+// normalized.sellTokenBalance is now "erc20"
+// normalized.buyTokenBalance is now "erc20"
+```
+</CodeGroup>
+
+### hashOrder
+
+Computes the EIP-712 hash for an order:
+
+```typescript
+export function hashOrder(
+  domain: TypedDataDomain,
+  order: Order
+): string
+```
+
+<CodeGroup>
+```typescript Example
+import { hashOrder, domain } from "@cowprotocol/contracts";
+
+const gpv2Domain = domain(1, settlementContract);
+const orderHash = hashOrder(gpv2Domain, order);
+
+console.log("Order hash:", orderHash);
+// Output: "0x1234...abcd"
+```
+</CodeGroup>
+
+### computeOrderUid
+
+Computes the unique identifier for an order:
+
+```typescript
+export function computeOrderUid(
+  domain: TypedDataDomain,
+  order: Order,
+  owner: string
+): string
+```
+
+The order UID is a 56-byte identifier composed of:
+- Order digest (32 bytes)
+- Owner address (20 bytes)
+- Valid-to timestamp (4 bytes)
+
+<CodeGroup>
+```typescript Example
+import { computeOrderUid, domain } from "@cowprotocol/contracts";
+
+const gpv2Domain = domain(1, settlementContract);
+const ownerAddress = await wallet.getAddress();
+
+const orderUid = computeOrderUid(gpv2Domain, order, ownerAddress);
+console.log("Order UID:", orderUid);
+// Output: "0x1234...abcd" (56 bytes / 112 hex chars)
+```
+</CodeGroup>
+
+### extractOrderUidParams
+
+Extracts components from an order UID:
+
+```typescript
+export function extractOrderUidParams(orderUid: string): OrderUidParams
+
+export interface OrderUidParams {
+  orderDigest: string;
+  owner: string;
+  validTo: number;
+}
+```
+
+<CodeGroup>
+```typescript Example
+import { extractOrderUidParams } from "@cowprotocol/contracts";
+
+const params = extractOrderUidParams(orderUid);
+console.log("Order digest:", params.orderDigest);
+console.log("Owner:", params.owner);
+console.log("Valid until:", new Date(params.validTo * 1000));
+```
+</CodeGroup>
+
+## Constants
+
+### BUY_ETH_ADDRESS
+
+Special address to indicate buying native ETH:
+
+```typescript
+export const BUY_ETH_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+```
+
+<Note>
+  This address only has special meaning in the `buyToken` field. Using it as `sellToken` will cause the settlement to revert.
+</Note>
+
+<CodeGroup>
+```typescript Example
+const ethBuyOrder: Order = {
+  sellToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", // USDC
+  buyToken: BUY_ETH_ADDRESS, // Buy ETH
+  sellAmount: ethers.utils.parseUnits("3000", 6),
+  buyAmount: ethers.utils.parseEther("1"),
+  // ... other fields
+};
+```
+</CodeGroup>
+
+### ORDER_UID_LENGTH
+
+The byte length of an order UID (56 bytes):
+
+```typescript
+export const ORDER_UID_LENGTH = 56;
+```
+
+## Complete Example
+
+<CodeGroup>
+```typescript Create Order
+import {
+  domain,
+  Order,
+  OrderKind,
+  OrderBalance,
+  computeOrderUid,
+  hashOrder,
+} from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+// Setup
+const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+const settlementContract = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
+const gpv2Domain = domain(1, settlementContract);
+
+// Create order
+const order: Order = {
+  sellToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
+  buyToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",  // USDC
+  receiver: ethers.constants.AddressZero,
+  sellAmount: ethers.utils.parseEther("1"),
+  buyAmount: ethers.utils.parseUnits("3000", 6),
+  validTo: Math.floor(Date.now() / 1000) + 3600,
+  appData: ethers.constants.HashZero,
+  feeAmount: ethers.utils.parseEther("0.001"),
+  kind: OrderKind.SELL,
+  partiallyFillable: false,
+  sellTokenBalance: OrderBalance.ERC20,
+  buyTokenBalance: OrderBalance.ERC20,
+};
+
+// Compute order hash and UID
+const orderHash = hashOrder(gpv2Domain, order);
+const orderUid = computeOrderUid(gpv2Domain, order, await wallet.getAddress());
+
+console.log("Order hash:", orderHash);
+console.log("Order UID:", orderUid);
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sign Orders" icon="signature" href="/sdk/signing">
+    Learn how to sign orders with different schemes
+  </Card>
+  
+  <Card title="Settlement" icon="scale-balanced" href="/sdk/settlement">
+    Encode orders into settlements for execution
+  </Card>
+</CardGroup>

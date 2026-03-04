@@ -1,0 +1,302 @@
+---
+title: "Signing"
+description: "Order signing utilities and signature schemes for CoW Protocol"
+---
+
+The signing module provides utilities for signing CoW Protocol orders using various signature schemes.
+
+## Types
+
+### SigningScheme
+
+Enum representing the signature scheme used to sign an order.
+
+```typescript
+enum SigningScheme {
+  EIP712 = 0b00,
+  ETHSIGN = 0b01,
+  EIP1271 = 0b10,
+  PRESIGN = 0b11
+}
+```
+
+<ParamField path="EIP712" type="0b00">
+  EIP-712 typed data signing (preferred). Provides more information to wallets about the data being signed.
+</ParamField>
+
+<ParamField path="ETHSIGN" type="0b01">
+  Message signed using `eth_sign` RPC call.
+</ParamField>
+
+<ParamField path="EIP1271" type="0b10">
+  Smart contract signatures as defined in EIP-1271. For contract-based wallets.
+</ParamField>
+
+<ParamField path="PRESIGN" type="0b11">
+  Pre-signed order. The order is signed on-chain before submission.
+</ParamField>
+
+### Signature
+
+Union type representing any valid order signature.
+
+```typescript
+type Signature = EcdsaSignature | Eip1271Signature | PreSignSignature;
+```
+
+### EcdsaSignature
+
+ECDSA signature for EIP-712 or ETHSIGN schemes.
+
+```typescript
+interface EcdsaSignature {
+  scheme: EcdsaSigningScheme;
+  data: SignatureLike;
+}
+```
+
+<ParamField path="scheme" type="SigningScheme.EIP712 | SigningScheme.ETHSIGN" required>
+  The ECDSA signing scheme used.
+</ParamField>
+
+<ParamField path="data" type="SignatureLike" required>
+  The ECDSA signature data (r, s, v components).
+</ParamField>
+
+### Eip1271Signature
+
+EIP-1271 smart contract signature.
+
+```typescript
+interface Eip1271Signature {
+  scheme: SigningScheme.EIP1271;
+  data: Eip1271SignatureData;
+}
+```
+
+<ParamField path="scheme" type="SigningScheme.EIP1271" required>
+  Must be `SigningScheme.EIP1271`.
+</ParamField>
+
+<ParamField path="data" type="Eip1271SignatureData" required>
+  The EIP-1271 signature data containing verifier and signature bytes.
+</ParamField>
+
+### Eip1271SignatureData
+
+Data for EIP-1271 signature verification.
+
+```typescript
+interface Eip1271SignatureData {
+  verifier: string;
+  signature: BytesLike;
+}
+```
+
+<ParamField path="verifier" type="string" required>
+  The address of the smart contract that will verify the signature.
+</ParamField>
+
+<ParamField path="signature" type="BytesLike" required>
+  Arbitrary signature data passed to the verifying contract's `isValidSignature` method.
+</ParamField>
+
+### PreSignSignature
+
+Signature data for a pre-signed order.
+
+```typescript
+interface PreSignSignature {
+  scheme: SigningScheme.PRESIGN;
+  data: string;
+}
+```
+
+<ParamField path="scheme" type="SigningScheme.PRESIGN" required>
+  Must be `SigningScheme.PRESIGN`.
+</ParamField>
+
+<ParamField path="data" type="string" required>
+  The address of the order signer.
+</ParamField>
+
+## Functions
+
+### signOrder
+
+Signs a CoW Protocol order using an externally owned account (EOA).
+
+```typescript
+async function signOrder(
+  domain: TypedDataDomain,
+  order: Order,
+  owner: Signer,
+  scheme: EcdsaSigningScheme
+): Promise<EcdsaSignature>
+```
+
+<ParamField path="domain" type="TypedDataDomain" required>
+  The EIP-712 domain separator. Ensures orders can't be replayed across different deployments or chains.
+</ParamField>
+
+<ParamField path="order" type="Order" required>
+  The order to sign.
+</ParamField>
+
+<ParamField path="owner" type="Signer" required>
+  The Ethers.js signer (wallet) that will sign the order.
+</ParamField>
+
+<ParamField path="scheme" type="EcdsaSigningScheme" required>
+  The signing scheme to use: `SigningScheme.EIP712` (recommended) or `SigningScheme.ETHSIGN`.
+</ParamField>
+
+<ResponseField name="signature" type="EcdsaSignature">
+  The ECDSA signature with the signing scheme encoded.
+</ResponseField>
+
+### Example
+
+```typescript
+import { signOrder, SigningScheme, domain } from "@cowprotocol/contracts";
+import { Wallet } from "ethers";
+
+const wallet = new Wallet("0x...");
+const settlementDomain = domain(1, "0x9008D19f58AAbD9eD0D60971565AA8510560ab41");
+
+const signature = await signOrder(
+  settlementDomain,
+  order,
+  wallet,
+  SigningScheme.EIP712
+);
+```
+
+### encodeEip1271SignatureData
+
+Encodes EIP-1271 signature data for use with CoW Protocol contracts.
+
+```typescript
+function encodeEip1271SignatureData(
+  data: Eip1271SignatureData
+): string
+```
+
+<ParamField path="data" type="Eip1271SignatureData" required>
+  The EIP-1271 signature data to encode.
+</ParamField>
+
+<ResponseField name="encoded" type="string">
+  Hex-encoded signature data with verifier address and signature bytes packed together.
+</ResponseField>
+
+### decodeEip1271SignatureData
+
+Decodes a CoW Protocol EIP-1271 signature into its components.
+
+```typescript
+function decodeEip1271SignatureData(
+  signature: BytesLike
+): Eip1271SignatureData
+```
+
+<ParamField path="signature" type="BytesLike" required>
+  The encoded EIP-1271 signature data.
+</ParamField>
+
+<ResponseField name="decoded" type="Eip1271SignatureData">
+  The decoded signature containing the verifier address and signature bytes.
+</ResponseField>
+
+## Constants
+
+### EIP1271_MAGICVALUE
+
+The magic value returned by a successful `isValidSignature` call.
+
+```typescript
+const EIP1271_MAGICVALUE = "0x1626ba7e";
+```
+
+<Info>
+This is `bytes4(keccak256("isValidSignature(bytes32,bytes)"))` as defined in the EIP-1271 standard.
+</Info>
+
+## Usage Notes
+
+<Note>
+**EIP-712 is the recommended signing scheme** as it provides the best user experience. Wallets can display structured information about what the user is signing.
+</Note>
+
+<Info>
+**EIP-1271 is required for smart contract wallets** like Gnosis Safe, Argent, or any contract-based wallet that doesn't have a private key.
+</Info>
+
+<Note>
+**Pre-signed orders** require an on-chain transaction to authorize the order before it can be settled. This is useful for integration with other smart contracts.
+</Note>
+
+## Type Definitions
+
+### SignatureLike
+
+A type that can be converted to an Ethers.js signature.
+
+```typescript
+type SignatureLike = string | {
+  r: string;
+  s: string;
+  v: number;
+  yParityAndS?: string;
+  compact?: string;
+};
+```
+
+### EcdsaSigningScheme
+
+Type alias for ECDSA signing schemes.
+
+```typescript
+type EcdsaSigningScheme = SigningScheme.EIP712 | SigningScheme.ETHSIGN;
+```
+
+## Complete Example
+
+```typescript
+import {
+  Order,
+  OrderKind,
+  signOrder,
+  SigningScheme,
+  domain,
+  Signature,
+} from "@cowprotocol/contracts";
+import { Wallet } from "ethers";
+
+// Create an order
+const order: Order = {
+  sellToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  buyToken: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+  sellAmount: "1000000000000000000",
+  buyAmount: "3000000000000000000000",
+  validTo: Math.floor(Date.now() / 1000) + 3600,
+  appData: 1,
+  feeAmount: "5000000000000000",
+  kind: OrderKind.SELL,
+  partiallyFillable: false,
+};
+
+// Sign the order
+const wallet = new Wallet(privateKey);
+const settlementDomain = domain(1, "0x9008D19f58AAbD9eD0D60971565AA8510560ab41");
+
+const signature: Signature = await signOrder(
+  settlementDomain,
+  order,
+  wallet,
+  SigningScheme.EIP712
+);
+
+console.log("Signature scheme:", signature.scheme);
+console.log("Signature data:", signature.data);
+```

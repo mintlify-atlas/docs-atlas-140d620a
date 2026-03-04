@@ -1,0 +1,251 @@
+---
+title: "Vault"
+description: "Balancer Vault integration utilities for CoW Protocol"
+---
+
+The vault module provides utilities for integrating CoW Protocol with the Balancer Vault, enabling the use of Balancer Vault internal balances and batch swaps.
+
+## Overview
+
+The CoW Protocol Vault Relayer allows orders to interact with Balancer Vault's advanced features:
+
+- Using Balancer Vault internal balances for trading
+- Re-using existing Vault ERC20 allowances
+- Executing batch swaps through Balancer pools
+
+This integration enables more efficient trading by reducing token transfers and approval transactions.
+
+## Constants
+
+### VAULT_INTERFACE
+
+Partial ABI interface for the Balancer Vault.
+
+```typescript
+const VAULT_INTERFACE: Interface;
+```
+
+<Info>
+This interface contains only the Vault methods used by the CoW Protocol Vault Relayer:
+- `manageUserBalance`
+- `batchSwap`
+</Info>
+
+## Functions
+
+### grantRequiredRoles
+
+Grants the required roles to the CoW Protocol Vault Relayer.
+
+```typescript
+async function grantRequiredRoles(
+  authorizer: Contract,
+  vaultAddress: string,
+  vaultRelayerAddress: string
+): Promise<void>
+```
+
+<ParamField path="authorizer" type="Contract" required>
+  The Balancer Vault Authorizer contract instance that manages access control.
+</ParamField>
+
+<ParamField path="vaultAddress" type="string" required>
+  The address of the Balancer Vault contract.
+</ParamField>
+
+<ParamField path="vaultRelayerAddress" type="string" required>
+  The address of the CoW Protocol Vault Relayer contract.
+</ParamField>
+
+<Note>
+This function is intended to be called by the Balancer Vault admin, **not** by traders. It's included in the SDK for completeness and documentation purposes.
+</Note>
+
+## Example Usage
+
+### Grant Vault Relayer Permissions
+
+```typescript
+import { grantRequiredRoles, VAULT_INTERFACE } from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+// Connect to the Balancer Authorizer contract
+const authorizerAddress = "0xA331D84eC860Bf466b4CdCcFb4aC09a1B43F3aE6";
+const authorizer = new ethers.Contract(
+  authorizerAddress,
+  [
+    "function grantRole(bytes32 role, address account)",
+  ],
+  adminSigner
+);
+
+// Grant roles to Vault Relayer
+const vaultAddress = "0xBA12222222228d8Ba445958a75a0704d566BF2C8";
+const vaultRelayerAddress = "0xC92E8bdf79f0507f65a392b0ab4667716BFE0110";
+
+await grantRequiredRoles(
+  authorizer,
+  vaultAddress,
+  vaultRelayerAddress
+);
+```
+
+### Using Balancer Vault Internal Balances
+
+```typescript
+import {
+  Order,
+  OrderKind,
+  OrderBalance,
+  domain,
+  signOrder,
+  SigningScheme,
+} from "@cowprotocol/contracts";
+import { Wallet } from "ethers";
+
+// Create an order that uses Vault internal balances
+const order: Order = {
+  sellToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
+  buyToken: "0x6B175474E89094C44Da98b954EedeAC495271d0F", // DAI
+  sellAmount: "1000000000000000000",
+  buyAmount: "3000000000000000000000",
+  validTo: Math.floor(Date.now() / 1000) + 3600,
+  appData: 1,
+  feeAmount: "5000000000000000",
+  kind: OrderKind.SELL,
+  partiallyFillable: false,
+  // Use Balancer Vault internal balance for sell token
+  sellTokenBalance: OrderBalance.INTERNAL,
+  // Receive buy tokens to Vault internal balance
+  buyTokenBalance: OrderBalance.INTERNAL,
+};
+
+const wallet = new Wallet(privateKey);
+const settlementDomain = domain(1, "0x9008D19f58AAbD9eD0D60971565AA8510560ab41");
+
+const signature = await signOrder(
+  settlementDomain,
+  order,
+  wallet,
+  SigningScheme.EIP712
+);
+```
+
+### Using Vault External Balances
+
+```typescript
+import { Order, OrderKind, OrderBalance } from "@cowprotocol/contracts";
+
+// Use Vault external balances (re-uses Vault allowances)
+const order: Order = {
+  sellToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  buyToken: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+  sellAmount: "1000000000000000000",
+  buyAmount: "3000000000000000000000",
+  validTo: Math.floor(Date.now() / 1000) + 3600,
+  appData: 1,
+  feeAmount: "5000000000000000",
+  kind: OrderKind.SELL,
+  partiallyFillable: false,
+  // Use Vault external balance - re-uses existing Vault allowance
+  sellTokenBalance: OrderBalance.EXTERNAL,
+  // Buy tokens sent as regular ERC20
+  buyTokenBalance: OrderBalance.ERC20,
+};
+```
+
+### Encoding Vault Batch Swap Interaction
+
+```typescript
+import { VAULT_INTERFACE, normalizeInteraction } from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+// Encode a Balancer batch swap
+const swaps = [
+  {
+    poolId: "0x5c6ee304399dbdb9c8ef030ab642b10820db8f56000200000000000000000014",
+    assetInIndex: 0,
+    assetOutIndex: 1,
+    amount: "1000000000000000000",
+    userData: "0x",
+  },
+];
+
+const assets = [
+  "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
+  "0x6B175474E89094C44Da98b954EedeAC495271d0F", // DAI
+];
+
+const funds = {
+  sender: settlementAddress,
+  fromInternalBalance: false,
+  recipient: settlementAddress,
+  toInternalBalance: false,
+};
+
+const limits = [
+  ethers.constants.MaxInt256,
+  ethers.constants.MaxInt256,
+];
+
+const deadline = Math.floor(Date.now() / 1000) + 3600;
+
+const batchSwapInteraction = normalizeInteraction({
+  target: "0xBA12222222228d8Ba445958a75a0704d566BF2C8", // Balancer Vault
+  callData: VAULT_INTERFACE.encodeFunctionData("batchSwap", [
+    0, // SwapKind.GIVEN_IN
+    swaps,
+    assets,
+    funds,
+    limits,
+    deadline,
+  ]),
+});
+```
+
+## Balance Types
+
+When using Balancer Vault integration, orders can specify how tokens are withdrawn and deposited:
+
+### Sell Token Balance
+
+- **`OrderBalance.ERC20`**: Standard ERC20 transfer from user wallet (requires approval to Vault Relayer)
+- **`OrderBalance.EXTERNAL`**: Uses Balancer Vault external balance (re-uses existing Vault approval)
+- **`OrderBalance.INTERNAL`**: Uses Balancer Vault internal balance
+
+### Buy Token Balance
+
+- **`OrderBalance.ERC20`**: Buy tokens sent as standard ERC20 transfer
+- **`OrderBalance.INTERNAL`**: Buy tokens deposited to Vault internal balance
+- **`OrderBalance.EXTERNAL`**: Treated as `ERC20` (external only valid for sell token)
+
+<Info>
+Using Vault internal balances can significantly reduce gas costs by eliminating ERC20 transfers. However, tokens must already be deposited in the Vault.
+</Info>
+
+## Contract Addresses
+
+### Mainnet
+
+- **Balancer Vault**: `0xBA12222222228d8Ba445958a75a0704d566BF2C8`
+- **Vault Authorizer**: `0xA331D84eC860Bf466b4CdCcFb4aC09a1B43F3aE6`
+- **CoW Protocol Vault Relayer**: `0xC92E8bdf79f0507f65a392b0ab4667716BFE0110`
+
+<Note>
+Check the [official documentation](https://docs.cow.fi) for addresses on other networks.
+</Note>
+
+## Best Practices
+
+<Note>
+- Only use Vault internal balances if you have tokens already deposited in the Vault
+- Vault external balances require an existing approval to the Balancer Vault contract
+- Test thoroughly on testnets before using Vault integration in production
+- Be aware that Vault internal balance operations have different gas costs than ERC20 transfers
+</Note>
+
+## Related
+
+- [Order Types](/api/ts/order) - Learn about order balance configuration
+- [Interaction](/api/ts/interaction) - Learn about encoding interactions
+- [Settlement](/api/ts/settlement) - Learn about settlement encoding

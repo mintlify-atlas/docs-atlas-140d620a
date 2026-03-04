@@ -1,0 +1,419 @@
+---
+title: "Signing"
+description: "Sign CoW Protocol orders using EIP-712, EthSign, EIP-1271, and PreSign schemes"
+---
+
+## Overview
+
+CoW Protocol supports multiple signing schemes to accommodate different types of accounts:
+
+- **EIP-712**: Structured data signing for EOAs (recommended)
+- **EthSign**: Legacy `eth_sign` signature for EOAs
+- **EIP-1271**: Smart contract signature verification
+- **PreSign**: On-chain order approval
+
+## SigningScheme Enum
+
+```typescript
+export enum SigningScheme {
+  EIP712 = 0b00,   // EIP-712 typed data signing
+  ETHSIGN = 0b01,  // eth_sign RPC call
+  EIP1271 = 0b10,  // Smart contract signatures (EIP-1271)
+  PRESIGN = 0b11,  // Pre-signed orders
+}
+```
+
+<ParamField path="SigningScheme.EIP712" type="number">
+  EIP-712 typed data signing scheme. This is the **recommended** method as it provides clear information to wallets about what is being signed.
+  
+  Reference: [EIP-712 Specification](https://eips.ethereum.org/EIPS/eip-712)
+</ParamField>
+
+<ParamField path="SigningScheme.ETHSIGN" type="number">
+  Legacy message signing using the `eth_sign` RPC call. Provides less context to users about what they're signing.
+</ParamField>
+
+<ParamField path="SigningScheme.EIP1271" type="number">
+  Smart contract signatures as defined in EIP-1271. Used for contract-based accounts like multi-sigs and smart wallets.
+  
+  Reference: [EIP-1271 Specification](https://eips.ethereum.org/EIPS/eip-1271)
+</ParamField>
+
+<ParamField path="SigningScheme.PRESIGN" type="number">
+  Pre-signed orders approved on-chain. The order signature is validated by checking on-chain storage.
+</ParamField>
+
+## Signature Types
+
+### EcdsaSignature
+
+ECDSA signature for EOA signers:
+
+```typescript
+export interface EcdsaSignature {
+  scheme: EcdsaSigningScheme;  // EIP712 or ETHSIGN
+  data: SignatureLike;         // The ECDSA signature (r, s, v)
+}
+
+export type EcdsaSigningScheme = SigningScheme.EIP712 | SigningScheme.ETHSIGN;
+```
+
+### Eip1271Signature
+
+Signature for smart contract signers:
+
+```typescript
+export interface Eip1271Signature {
+  scheme: SigningScheme.EIP1271;
+  data: Eip1271SignatureData;
+}
+
+export interface Eip1271SignatureData {
+  verifier: string;      // The verifying contract address
+  signature: BytesLike;  // Arbitrary signature data
+}
+```
+
+### PreSignSignature
+
+Signature for pre-signed orders:
+
+```typescript
+export interface PreSignSignature {
+  scheme: SigningScheme.PRESIGN;
+  data: string;  // The address of the signer
+}
+```
+
+### Signature Union Type
+
+```typescript
+export type Signature = EcdsaSignature | Eip1271Signature | PreSignSignature;
+```
+
+## Signing Functions
+
+### signOrder
+
+Signs an order using ECDSA (EIP-712 or EthSign):
+
+```typescript
+export async function signOrder(
+  domain: TypedDataDomain,
+  order: Order,
+  owner: Signer,
+  scheme: EcdsaSigningScheme
+): Promise<EcdsaSignature>
+```
+
+<ParamField path="domain" type="TypedDataDomain" required>
+  The EIP-712 domain for the settlement contract. Prevents replay attacks across chains and deployments.
+</ParamField>
+
+<ParamField path="order" type="Order" required>
+  The order to sign.
+</ParamField>
+
+<ParamField path="owner" type="Signer" required>
+  The ethers.js signer (wallet) that will sign the order.
+</ParamField>
+
+<ParamField path="scheme" type="EcdsaSigningScheme" required>
+  The signing scheme: `SigningScheme.EIP712` (recommended) or `SigningScheme.ETHSIGN`.
+</ParamField>
+
+<ResponseField name="signature" type="EcdsaSignature">
+  The order signature with the signing scheme encoded.
+</ResponseField>
+
+## Examples
+
+### EIP-712 Signing (Recommended)
+
+<CodeGroup>
+```typescript EIP-712 Example
+import {
+  domain,
+  Order,
+  OrderKind,
+  signOrder,
+  SigningScheme,
+} from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+// Setup
+const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+const settlementContract = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
+const gpv2Domain = domain(1, settlementContract);
+
+// Create order
+const order: Order = {
+  sellToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  buyToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  sellAmount: ethers.utils.parseEther("1"),
+  buyAmount: ethers.utils.parseUnits("3000", 6),
+  validTo: Math.floor(Date.now() / 1000) + 3600,
+  appData: 0,
+  feeAmount: ethers.utils.parseEther("0.001"),
+  kind: OrderKind.SELL,
+  partiallyFillable: false,
+};
+
+// Sign with EIP-712
+const signature = await signOrder(
+  gpv2Domain,
+  order,
+  wallet,
+  SigningScheme.EIP712
+);
+
+console.log("Signature scheme:", signature.scheme);
+console.log("Signature data:", signature.data);
+```
+</CodeGroup>
+
+<Note>
+  EIP-712 is the recommended signing method because it shows users a structured representation of the order data in their wallet, making it clear what they're signing.
+</Note>
+
+### EthSign Signing
+
+<CodeGroup>
+```typescript EthSign Example
+import { signOrder, SigningScheme } from "@cowprotocol/contracts";
+
+// Sign with eth_sign (legacy method)
+const signature = await signOrder(
+  gpv2Domain,
+  order,
+  wallet,
+  SigningScheme.ETHSIGN
+);
+
+console.log("Signature:", signature);
+```
+</CodeGroup>
+
+<Warning>
+  EthSign provides less context to users and should only be used for backwards compatibility with wallets that don't support EIP-712.
+</Warning>
+
+### EIP-1271 Smart Contract Signatures
+
+For smart contract wallets (multi-sigs, etc.):
+
+<CodeGroup>
+```typescript EIP-1271 Example
+import {
+  Eip1271Signature,
+  SigningScheme,
+  encodeEip1271SignatureData,
+} from "@cowprotocol/contracts";
+
+// Prepare smart contract signature
+const smartContractAddress = "0x1234...";
+const arbitrarySignatureData = "0xabcd...";
+
+const signature: Eip1271Signature = {
+  scheme: SigningScheme.EIP1271,
+  data: {
+    verifier: smartContractAddress,
+    signature: arbitrarySignatureData,
+  },
+};
+
+// Encode for settlement
+const encoded = encodeEip1271SignatureData(signature.data);
+console.log("Encoded signature:", encoded);
+```
+</CodeGroup>
+
+### PreSign Orders
+
+For orders approved on-chain:
+
+<CodeGroup>
+```typescript PreSign Example
+import {
+  PreSignSignature,
+  SigningScheme,
+  computeOrderUid,
+} from "@cowprotocol/contracts";
+import { GPv2Settlement__factory } from "@cowprotocol/contracts";
+
+// Create pre-sign signature
+const ownerAddress = await wallet.getAddress();
+const signature: PreSignSignature = {
+  scheme: SigningScheme.PRESIGN,
+  data: ownerAddress,
+};
+
+// Approve order on-chain
+const settlement = GPv2Settlement__factory.connect(
+  settlementContract,
+  wallet
+);
+
+const orderUid = computeOrderUid(gpv2Domain, order, ownerAddress);
+const tx = await settlement.setPreSignature(orderUid, true);
+await tx.wait();
+
+console.log("Order pre-signed on-chain");
+```
+</CodeGroup>
+
+## EIP-1271 Helper Functions
+
+### encodeEip1271SignatureData
+
+Encodes EIP-1271 signature data for the settlement contract:
+
+```typescript
+export function encodeEip1271SignatureData(
+  data: Eip1271SignatureData
+): string
+```
+
+<CodeGroup>
+```typescript Example
+import { encodeEip1271SignatureData } from "@cowprotocol/contracts";
+
+const encoded = encodeEip1271SignatureData({
+  verifier: "0x1234567890123456789012345678901234567890",
+  signature: "0xabcdef",
+});
+
+// Returns: verifier address concatenated with signature bytes
+console.log(encoded);
+```
+</CodeGroup>
+
+### decodeEip1271SignatureData
+
+Decodes EIP-1271 signature data:
+
+```typescript
+export function decodeEip1271SignatureData(
+  signature: BytesLike
+): Eip1271SignatureData
+```
+
+<CodeGroup>
+```typescript Example
+import { decodeEip1271SignatureData } from "@cowprotocol/contracts";
+
+const decoded = decodeEip1271SignatureData(encodedSignature);
+console.log("Verifier:", decoded.verifier);
+console.log("Signature:", decoded.signature);
+```
+</CodeGroup>
+
+## Constants
+
+### EIP1271_MAGICVALUE
+
+The magic value returned by a successful EIP-1271 signature verification:
+
+```typescript
+export const EIP1271_MAGICVALUE = "0x1626ba7e";
+// bytes4(keccak256("isValidSignature(bytes32,bytes)"))
+```
+
+This value is returned by the `isValidSignature` function defined in EIP-1271 when a signature is valid.
+
+## Complete Signing Example
+
+<CodeGroup>
+```typescript Full Example
+import {
+  domain,
+  Order,
+  OrderKind,
+  signOrder,
+  SigningScheme,
+  computeOrderUid,
+  hashOrder,
+} from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+async function createAndSignOrder() {
+  // Setup wallet and domain
+  const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+  const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+  const settlementContract = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
+  const gpv2Domain = domain(1, settlementContract);
+
+  // Create order
+  const order: Order = {
+    sellToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
+    buyToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",  // USDC
+    sellAmount: ethers.utils.parseEther("1"),
+    buyAmount: ethers.utils.parseUnits("3000", 6),
+    validTo: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
+    appData: 0,
+    feeAmount: ethers.utils.parseEther("0.001"),
+    kind: OrderKind.SELL,
+    partiallyFillable: false,
+  };
+
+  // Sign order
+  const signature = await signOrder(
+    gpv2Domain,
+    order,
+    wallet,
+    SigningScheme.EIP712
+  );
+
+  // Compute order identifiers
+  const ownerAddress = await wallet.getAddress();
+  const orderHash = hashOrder(gpv2Domain, order);
+  const orderUid = computeOrderUid(gpv2Domain, order, ownerAddress);
+
+  return {
+    order,
+    signature,
+    orderHash,
+    orderUid,
+    owner: ownerAddress,
+  };
+}
+
+// Usage
+const orderData = await createAndSignOrder();
+console.log("Order UID:", orderData.orderUid);
+console.log("Signature:", orderData.signature);
+```
+</CodeGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use EIP-712" icon="check">
+    Always prefer EIP-712 signing for EOAs as it provides the best user experience and security.
+  </Card>
+  
+  <Card title="Verify Domain" icon="shield">
+    Always use the correct domain with the right chain ID and settlement contract address.
+  </Card>
+  
+  <Card title="Handle Errors" icon="triangle-exclamation">
+    Catch and handle signing errors gracefully, as users may reject the signature request.
+  </Card>
+  
+  <Card title="Test Signatures" icon="vial">
+    Test signature recovery to ensure the signer matches the expected owner address.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Settlement Encoding" icon="code" href="/sdk/settlement">
+    Learn how to encode signed orders into settlements
+  </Card>
+  
+  <Card title="Order Management" icon="list" href="/sdk/orders">
+    Back to order creation and management
+  </Card>
+</CardGroup>

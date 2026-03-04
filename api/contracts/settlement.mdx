@@ -1,0 +1,396 @@
+---
+title: GPv2Settlement
+description: Core settlement contract for executing batch trades in Gnosis Protocol v2
+---
+
+The `GPv2Settlement` contract is the central component of Gnosis Protocol v2 that handles trade execution. It processes batched orders at clearing prices, executes interactions with external contracts, and manages order validity.
+
+## Contract Overview
+
+```solidity
+contract GPv2Settlement is GPv2Signing, ReentrancyGuard, StorageAccessible
+```
+
+The settlement contract inherits from:
+- `GPv2Signing`: Handles signature verification and order recovery
+- `ReentrancyGuard`: Prevents reentrancy attacks
+- `StorageAccessible`: Allows reading contract storage
+
+## State Variables
+
+### authenticator
+
+```solidity
+GPv2Authentication public immutable authenticator
+```
+
+The authenticator contract that determines who can call the settle function. Only authorized solvers can invoke settlements through the `isSolver` method.
+
+### vault
+
+```solidity
+IVault public immutable vault
+```
+
+The Balancer Vault used for managing user funds. This vault handles all token transfers for the protocol.
+
+### vaultRelayer
+
+```solidity
+GPv2VaultRelayer public immutable vaultRelayer
+```
+
+The Balancer Vault relayer contract that interacts on behalf of users. Created during contract deployment.
+
+### filledAmount
+
+```solidity
+mapping(bytes => uint256) public filledAmount
+```
+
+Maps each order UID to the amount that has been filled. If this amount is greater than or equal to the order's traded amount, the order cannot be traded anymore. For fill-or-kill orders, this determines if the order has already been executed.
+
+## Events
+
+### Trade
+
+```solidity
+event Trade(
+    address indexed owner,
+    IERC20 sellToken,
+    IERC20 buyToken,
+    uint256 sellAmount,
+    uint256 buyAmount,
+    uint256 feeAmount,
+    bytes orderUid
+)
+```
+
+Emitted for each executed trade in a settlement.
+
+<ParamField path="owner" type="address">
+  The order owner
+</ParamField>
+
+<ParamField path="sellToken" type="IERC20">
+  The token being sold
+</ParamField>
+
+<ParamField path="buyToken" type="IERC20">
+  The token being bought
+</ParamField>
+
+<ParamField path="sellAmount" type="uint256">
+  The amount of sell token (including fees)
+</ParamField>
+
+<ParamField path="buyAmount" type="uint256">
+  The amount of buy token received
+</ParamField>
+
+<ParamField path="feeAmount" type="uint256">
+  The fee amount charged
+</ParamField>
+
+<ParamField path="orderUid" type="bytes">
+  The unique order identifier
+</ParamField>
+
+### Interaction
+
+```solidity
+event Interaction(address indexed target, uint256 value, bytes4 selector)
+```
+
+Emitted for each executed interaction. For gas efficiency, only the interaction calldata selector (first 4 bytes) is included. For interactions without calldata or with calldata shorter than 4 bytes, the selector will be `0`.
+
+<ParamField path="target" type="address">
+  The target contract address
+</ParamField>
+
+<ParamField path="value" type="uint256">
+  The ETH value sent with the interaction
+</ParamField>
+
+<ParamField path="selector" type="bytes4">
+  The function selector being called
+</ParamField>
+
+### Settlement
+
+```solidity
+event Settlement(address indexed solver)
+```
+
+Emitted when a settlement completes successfully.
+
+<ParamField path="solver" type="address">
+  The solver who submitted the settlement
+</ParamField>
+
+### OrderInvalidated
+
+```solidity
+event OrderInvalidated(address indexed owner, bytes orderUid)
+```
+
+Emitted when an order is invalidated by its owner.
+
+<ParamField path="owner" type="address">
+  The order owner
+</ParamField>
+
+<ParamField path="orderUid" type="bytes">
+  The unique order identifier
+</ParamField>
+
+## Constructor
+
+```solidity
+constructor(GPv2Authentication authenticator_, IVault vault_)
+```
+
+Initializes the settlement contract with an authenticator and vault.
+
+<ParamField path="authenticator_" type="GPv2Authentication">
+  The authentication contract for solver validation
+</ParamField>
+
+<ParamField path="vault_" type="IVault">
+  The Balancer Vault for token management
+</ParamField>
+
+## Modifiers
+
+### onlySolver
+
+```solidity
+modifier onlySolver()
+```
+
+Restricts function access to authorized solvers only. Called by the settle function to block non-listed senders from settling batches.
+
+### onlyInteraction
+
+```solidity
+modifier onlyInteraction()
+```
+
+Ensures an external function is only callable as a settlement interaction. Requires that `msg.sender` is the settlement contract itself.
+
+## Functions
+
+### settle
+
+```solidity
+function settle(
+    IERC20[] calldata tokens,
+    uint256[] calldata clearingPrices,
+    GPv2Trade.Data[] calldata trades,
+    GPv2Interaction.Data[][3] calldata interactions
+) external nonReentrant onlySolver
+```
+
+Settles specified orders at clearing prices. This is the main entry point for batch settlements.
+
+<ParamField path="tokens" type="IERC20[]">
+  Array of ERC20 tokens traded in the settlement. Trades encode tokens as indices into this array.
+</ParamField>
+
+<ParamField path="clearingPrices" type="uint256[]">
+  Array of clearing prices where the i-th price is for the i-th token
+</ParamField>
+
+<ParamField path="trades" type="GPv2Trade.Data[]">
+  Array of trades for signed orders
+</ParamField>
+
+<ParamField path="interactions" type="GPv2Interaction.Data[][3]">
+  Three arrays of interactions to run before settlement, during settlement, and after settlement
+</ParamField>
+
+<Note>
+The caller must ensure all GPv2 invariants are upheld:
+- All orders are valid and signed
+- Accounts have sufficient balance and approval
+- Settlement contract has sufficient balance to execute trades
+</Note>
+
+<Warning>
+The settlement contract can use accumulated fees for settlement. Misbehaving solvers will be slashed for abusing this.
+</Warning>
+
+### swap
+
+```solidity
+function swap(
+    IVault.BatchSwapStep[] calldata swaps,
+    IERC20[] calldata tokens,
+    GPv2Trade.Data calldata trade
+) external nonReentrant onlySolver
+```
+
+Settles an order directly against Balancer V2 pools. The order is always fully executed.
+
+<ParamField path="swaps" type="IVault.BatchSwapStep[]">
+  The Balancer V2 swap steps to use for trading
+</ParamField>
+
+<ParamField path="tokens" type="IERC20[]">
+  Array of ERC20 tokens traded. Swaps and trades encode tokens as indices into this array.
+</ParamField>
+
+<ParamField path="trade" type="GPv2Trade.Data">
+  The trade to match against Balancer liquidity. The `executedAmount` field represents a swap limit amount.
+</ParamField>
+
+### invalidateOrder
+
+```solidity
+function invalidateOrder(bytes calldata orderUid) external
+```
+
+Invalidates an order that has been signed offline. Only the order creator can invalidate their order.
+
+<ParamField path="orderUid" type="bytes">
+  The unique identifier of the order to invalidate. Must be 56 bytes containing the order digest, owner address, and validTo timestamp.
+</ParamField>
+
+<Info>
+Invalidating an order sets its `filledAmount` to `type(uint256).max`, preventing it from being executed.
+</Info>
+
+### freeFilledAmountStorage
+
+```solidity
+function freeFilledAmountStorage(
+    bytes[] calldata orderUids
+) external onlyInteraction
+```
+
+Frees storage from filled amounts of expired orders to claim a gas refund. This method can only be called as an interaction.
+
+<ParamField path="orderUids" type="bytes[]">
+  The unique identifiers of expired orders to free storage for
+</ParamField>
+
+### freePreSignatureStorage
+
+```solidity
+function freePreSignatureStorage(
+    bytes[] calldata orderUids
+) external onlyInteraction
+```
+
+Frees storage from pre-signatures of expired orders to claim a gas refund. This method can only be called as an interaction.
+
+<ParamField path="orderUids" type="bytes[]">
+  The unique identifiers of expired orders to free storage for
+</ParamField>
+
+## Internal Functions
+
+### computeTradeExecutions
+
+```solidity
+function computeTradeExecutions(
+    IERC20[] calldata tokens,
+    uint256[] calldata clearingPrices,
+    GPv2Trade.Data[] calldata trades
+)
+    internal
+    returns (
+        GPv2Transfer.Data[] memory inTransfers,
+        GPv2Transfer.Data[] memory outTransfers
+    )
+```
+
+Processes all trades one at a time, returning computed net in and out transfers.
+
+<ResponseField name="inTransfers" type="GPv2Transfer.Data[]">
+  Array of in transfers of executed sell amounts
+</ResponseField>
+
+<ResponseField name="outTransfers" type="GPv2Transfer.Data[]">
+  Array of out transfers of executed buy amounts
+</ResponseField>
+
+### computeTradeExecution
+
+```solidity
+function computeTradeExecution(
+    RecoveredOrder memory recoveredOrder,
+    uint256 sellPrice,
+    uint256 buyPrice,
+    uint256 executedAmount,
+    GPv2Transfer.Data memory inTransfer,
+    GPv2Transfer.Data memory outTransfer
+) internal
+```
+
+Computes in and out transfer amounts for a single trade. This function reverts if:
+- The order has expired
+- The order's limit price is not respected
+- The order gets over-filled
+- The fee discount is larger than the executed fee
+
+<ParamField path="recoveredOrder" type="RecoveredOrder">
+  The recovered order to process
+</ParamField>
+
+<ParamField path="sellPrice" type="uint256">
+  The clearing price of the order's sell token
+</ParamField>
+
+<ParamField path="buyPrice" type="uint256">
+  The clearing price of the order's buy token
+</ParamField>
+
+<ParamField path="executedAmount" type="uint256">
+  The portion of the order to execute (ignored for fill-or-kill orders)
+</ParamField>
+
+<ParamField path="inTransfer" type="GPv2Transfer.Data">
+  Memory location for computed executed sell amount transfer
+</ParamField>
+
+<ParamField path="outTransfer" type="GPv2Transfer.Data">
+  Memory location for computed executed buy amount transfer
+</ParamField>
+
+### executeInteractions
+
+```solidity
+function executeInteractions(
+    GPv2Interaction.Data[] calldata interactions
+) internal
+```
+
+Executes a list of arbitrary contract calls from the settlement contract.
+
+<ParamField path="interactions" type="GPv2Interaction.Data[]">
+  The list of interactions to execute
+</ParamField>
+
+<Warning>
+Interactions with the vault relayer contract are explicitly disabled to prevent attacks on user funds.
+</Warning>
+
+## Receive Function
+
+```solidity
+receive() external payable
+```
+
+Allows the settlement contract to receive Ether from contract interactions.
+
+## Example: Price Calculation
+
+The settlement contract uses uniform clearing prices. The limit price check is based on:
+
+```solidity
+// For sell orders: amount_sell * price_sell >= amount_buy * price_buy
+order.sellAmount.mul(sellPrice) >= order.buyAmount.mul(buyPrice)
+```
+
+For example, if a chocolate bar is 0.50€ and a beer is 4€, then 1 beer is worth 8 chocolate bars: `1 * 4 = 8 * 0.5`.

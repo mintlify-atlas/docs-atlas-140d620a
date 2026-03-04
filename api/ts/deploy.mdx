@@ -1,0 +1,332 @@
+---
+title: "Deploy"
+description: "Deterministic contract deployment utilities for CoW Protocol"
+---
+
+The deploy module provides utilities for computing deterministic deployment addresses using CREATE2 and working with CoW Protocol contract deployments.
+
+## Overview
+
+CoW Protocol contracts are deployed deterministically using CREATE2, which means they have the same address across all EVM-compatible networks. This module helps compute these addresses before deployment.
+
+## Constants
+
+### SALT
+
+The salt used for deterministic deployment.
+
+```typescript
+const SALT: string;
+```
+
+Value: `bytes32` encoding of "Mattresses in Berlin!"
+
+<Info>
+This salt ensures deterministic addresses across all networks while being unique to CoW Protocol.
+</Info>
+
+### DEPLOYER_CONTRACT
+
+The CREATE2 deployer contract address.
+
+```typescript
+const DEPLOYER_CONTRACT = "0x4e59b44847b379578588920ca78fbf26c0b4956c";
+```
+
+<Info>
+This is the [Arachnid deterministic deployment proxy](https://github.com/Arachnid/deterministic-deployment-proxy) used by hardhat-deploy. It has the same address on all EVM networks.
+</Info>
+
+### CONTRACT_NAMES
+
+Dictionary of deployed CoW Protocol contract names.
+
+```typescript
+const CONTRACT_NAMES = {
+  authenticator: "GPv2AllowListAuthentication",
+  settlement: "GPv2Settlement",
+} as const;
+```
+
+<ParamField path="authenticator" type="string" default="GPv2AllowListAuthentication">
+  The authenticator contract name.
+</ParamField>
+
+<ParamField path="settlement" type="string" default="GPv2Settlement">
+  The settlement contract name.
+</ParamField>
+
+## Types
+
+### ContractName
+
+Type representing a deployed contract name.
+
+```typescript
+type ContractName = "GPv2AllowListAuthentication" | "GPv2Settlement";
+```
+
+### DeploymentArguments
+
+Type-safe deployment arguments for each contract.
+
+```typescript
+type DeploymentArguments<T> =
+  T extends "GPv2AllowListAuthentication"
+    ? never
+    : T extends "GPv2Settlement"
+    ? [authenticator: string, vaultRelayer: string]
+    : unknown[];
+```
+
+<Info>
+This type ensures that you provide the correct constructor arguments for each contract:
+- `GPv2AllowListAuthentication`: No constructor arguments
+- `GPv2Settlement`: Requires authenticator address and vault relayer address
+</Info>
+
+### Abi
+
+Allowed ABI definition types by Ethers.js.
+
+```typescript
+type Abi = string | ReadonlyArray<Fragment | JsonFragment | string> | Interface;
+```
+
+### ArtifactDeployment
+
+Contract artifact information for deployment.
+
+```typescript
+interface ArtifactDeployment {
+  abi: Abi;
+  bytecode: string;
+}
+```
+
+<ParamField path="abi" type="Abi" required>
+  The contract ABI in any format supported by Ethers.js.
+</ParamField>
+
+<ParamField path="bytecode" type="string" required>
+  The contract bytecode as a hex string.
+</ParamField>
+
+### NamedArtifactDeployment
+
+Artifact with a contract name matching a deployed contract.
+
+```typescript
+interface NamedArtifactDeployment<C extends ContractName>
+  extends ArtifactDeployment {
+  contractName: C;
+}
+```
+
+<ParamField path="contractName" type="ContractName" required>
+  The name of the contract being deployed.
+</ParamField>
+
+## Functions
+
+### deterministicDeploymentAddress
+
+Computes the deterministic address where a contract will be deployed.
+
+```typescript
+function deterministicDeploymentAddress<C>(
+  artifact: ArtifactDeployment | NamedArtifactDeployment<C>,
+  deploymentArguments: DeploymentArguments<C>
+): string
+```
+
+<ParamField path="artifact" type="ArtifactDeployment" required>
+  The contract artifact containing ABI and bytecode.
+</ParamField>
+
+<ParamField path="deploymentArguments" type="DeploymentArguments<C>" required>
+  Constructor arguments required for deployment. Type-checked based on contract name.
+</ParamField>
+
+<ResponseField name="address" type="string">
+  The deterministic address where the contract will be deployed. This address is the same across all networks.
+</ResponseField>
+
+## Examples
+
+### Compute Settlement Contract Address
+
+```typescript
+import {
+  deterministicDeploymentAddress,
+  CONTRACT_NAMES,
+  DeploymentArguments,
+} from "@cowprotocol/contracts";
+import settlementArtifact from "./artifacts/GPv2Settlement.json";
+
+const authenticatorAddress = "0x1234567890123456789012345678901234567890";
+const vaultRelayerAddress = "0x0987654321098765432109876543210987654321";
+
+const settlementAddress = deterministicDeploymentAddress(
+  {
+    abi: settlementArtifact.abi,
+    bytecode: settlementArtifact.bytecode,
+    contractName: CONTRACT_NAMES.settlement,
+  },
+  [authenticatorAddress, vaultRelayerAddress]
+);
+
+console.log("Settlement will be deployed at:", settlementAddress);
+```
+
+### Compute Authenticator Address
+
+```typescript
+import {
+  deterministicDeploymentAddress,
+  CONTRACT_NAMES,
+} from "@cowprotocol/contracts";
+import authenticatorArtifact from "./artifacts/GPv2AllowListAuthentication.json";
+
+// Authenticator has no constructor arguments
+const authenticatorAddress = deterministicDeploymentAddress(
+  {
+    abi: authenticatorArtifact.abi,
+    bytecode: authenticatorArtifact.bytecode,
+    contractName: CONTRACT_NAMES.authenticator,
+  },
+  undefined as never // No arguments needed
+);
+
+console.log("Authenticator will be deployed at:", authenticatorAddress);
+```
+
+### Compute Address for Custom Contract
+
+```typescript
+import { deterministicDeploymentAddress } from "@cowprotocol/contracts";
+import customContractArtifact from "./artifacts/CustomContract.json";
+
+// For contracts not in CONTRACT_NAMES
+const customAddress = deterministicDeploymentAddress(
+  {
+    abi: customContractArtifact.abi,
+    bytecode: customContractArtifact.bytecode,
+  },
+  [arg1, arg2, arg3] // Constructor arguments
+);
+
+console.log("Custom contract will be deployed at:", customAddress);
+```
+
+### Verify Deployment Address
+
+```typescript
+import {
+  deterministicDeploymentAddress,
+  CONTRACT_NAMES,
+} from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+// Compute expected address
+const expectedAddress = deterministicDeploymentAddress(
+  settlementArtifact,
+  [authenticatorAddress, vaultRelayerAddress]
+);
+
+// Check if contract is deployed
+const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+const code = await provider.getCode(expectedAddress);
+
+if (code === "0x") {
+  console.log("Contract not yet deployed at:", expectedAddress);
+} else {
+  console.log("Contract already deployed at:", expectedAddress);
+}
+```
+
+### Deploy with Hardhat
+
+```typescript
+import { deterministicDeploymentAddress } from "@cowprotocol/contracts";
+import { ethers } from "hardhat";
+
+async function deploy() {
+  // Get contract factory
+  const Settlement = await ethers.getContractFactory("GPv2Settlement");
+  
+  // Compute expected address
+  const expectedAddress = deterministicDeploymentAddress(
+    {
+      abi: Settlement.interface.format(ethers.utils.FormatTypes.json),
+      bytecode: Settlement.bytecode,
+    },
+    [authenticatorAddress, vaultRelayerAddress]
+  );
+  
+  console.log("Will deploy to:", expectedAddress);
+  
+  // Deploy using CREATE2
+  const settlement = await Settlement.deploy(
+    authenticatorAddress,
+    vaultRelayerAddress
+  );
+  
+  await settlement.deployed();
+  
+  console.log("Deployed to:", settlement.address);
+  console.log("Matches expected:", settlement.address === expectedAddress);
+}
+```
+
+## How It Works
+
+The deterministic address is computed using the CREATE2 formula:
+
+```
+address = keccak256(0xff ++ deployerAddress ++ salt ++ keccak256(initCode))[12:]
+```
+
+Where:
+- `deployerAddress` is the CREATE2 deployer contract
+- `salt` is the CoW Protocol deployment salt
+- `initCode` is the contract bytecode + encoded constructor arguments
+
+<Info>
+Because the deployer address and salt are constant, and the bytecode is deterministic, the same contract with the same constructor arguments will always deploy to the same address on any EVM network.
+</Info>
+
+## Deployed Addresses
+
+CoW Protocol contracts are deployed at the same addresses across all supported networks:
+
+### Mainnet, Gnosis Chain, Görli, etc.
+
+- **GPv2Settlement**: `0x9008D19f58AAbD9eD0D60971565AA8510560ab41`
+- **GPv2AllowListAuthentication**: Address varies by network
+
+<Note>
+Check the [official documentation](https://docs.cow.fi) for complete deployment addresses across all networks.
+</Note>
+
+## Best Practices
+
+<Note>
+- Always verify the computed address matches the expected deployment address
+- Use the same bytecode and constructor arguments across all networks
+- Test deployment on testnets before mainnet
+- Keep track of deployed addresses for each network
+</Note>
+
+<Info>
+Deterministic deployment makes it easier to:
+- Maintain consistent addresses across networks
+- Simplify multi-chain integration
+- Predict contract addresses before deployment
+- Verify deployment correctness
+</Info>
+
+## Related
+
+- [Domain](/api/ts/domain) - Learn about creating domain objects with contract addresses
+- [Settlement](/api/ts/settlement) - Learn about the settlement contract

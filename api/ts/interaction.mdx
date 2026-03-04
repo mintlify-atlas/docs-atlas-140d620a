@@ -1,0 +1,294 @@
+---
+title: "Interaction"
+description: "Smart contract interaction utilities for CoW Protocol settlements"
+---
+
+The interaction module provides types and utilities for encoding smart contract interactions within CoW Protocol settlements.
+
+## Overview
+
+Interactions allow settlements to call arbitrary smart contracts during the settlement process. This enables advanced functionality like:
+
+- EIP-2612 permit calls for gasless approvals
+- AMM trades (Uniswap, Balancer, Curve, etc.)
+- Custom DeFi protocol interactions
+- Token wrapping/unwrapping
+
+## Types
+
+### Interaction
+
+Complete interaction data for calling a smart contract.
+
+```typescript
+interface Interaction {
+  target: string;
+  value: BigNumberish;
+  callData: BytesLike;
+}
+```
+
+<ParamField path="target" type="string" required>
+  The address of the smart contract to call.
+</ParamField>
+
+<ParamField path="value" type="BigNumberish" required>
+  The amount of native Ether (in wei) to send with the call. Set to 0 if no Ether should be sent.
+</ParamField>
+
+<ParamField path="callData" type="BytesLike" required>
+  The encoded function call data. Use Ethers.js `Interface.encodeFunctionData()` to generate this.
+</ParamField>
+
+### InteractionLike
+
+Partial interaction data where only `target` is required.
+
+```typescript
+type InteractionLike = Pick<Interaction, "target"> & Partial<Interaction>;
+```
+
+<Info>
+Use `InteractionLike` when creating interactions. The `value` and `callData` fields default to `0` and `"0x"` respectively.
+</Info>
+
+## Functions
+
+### normalizeInteraction
+
+Normalizes interaction data for ABI encoding.
+
+```typescript
+function normalizeInteraction(
+  interaction: InteractionLike
+): Interaction
+```
+
+<ParamField path="interaction" type="InteractionLike" required>
+  The interaction to normalize. Only `target` is required.
+</ParamField>
+
+<ResponseField name="interaction" type="Interaction">
+  A complete interaction with `value` defaulting to `0` and `callData` defaulting to `"0x"`.
+</ResponseField>
+
+### normalizeInteractions
+
+Normalizes multiple interactions at once.
+
+```typescript
+function normalizeInteractions(
+  interactions: InteractionLike[]
+): Interaction[]
+```
+
+<ParamField path="interactions" type="InteractionLike[]" required>
+  Array of interactions to normalize.
+</ParamField>
+
+<ResponseField name="interactions" type="Interaction[]">
+  Array of normalized interactions.
+</ResponseField>
+
+## Examples
+
+### Basic Interaction
+
+```typescript
+import { normalizeInteraction } from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+// Simple interaction with just a target
+const interaction = normalizeInteraction({
+  target: "0x1234567890123456789012345678901234567890",
+});
+
+console.log(interaction);
+// {
+//   target: "0x1234567890123456789012345678901234567890",
+//   value: 0,
+//   callData: "0x"
+// }
+```
+
+### ERC20 Approve Interaction
+
+```typescript
+import { normalizeInteraction } from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+const erc20Interface = new ethers.utils.Interface([
+  "function approve(address spender, uint256 amount)",
+]);
+
+const approveInteraction = normalizeInteraction({
+  target: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
+  callData: erc20Interface.encodeFunctionData("approve", [
+    "0x9008D19f58AAbD9eD0D60971565AA8510560ab41", // Spender
+    ethers.constants.MaxUint256, // Amount
+  ]),
+});
+```
+
+### EIP-2612 Permit Interaction
+
+```typescript
+import { normalizeInteraction } from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+const permitInterface = new ethers.utils.Interface([
+  "function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)",
+]);
+
+const permitInteraction = normalizeInteraction({
+  target: tokenAddress,
+  callData: permitInterface.encodeFunctionData("permit", [
+    owner,
+    spender,
+    amount,
+    deadline,
+    v,
+    r,
+    s,
+  ]),
+});
+```
+
+### Uniswap V2 Swap Interaction
+
+```typescript
+import { normalizeInteraction } from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+const uniswapRouterInterface = new ethers.utils.Interface([
+  "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline)",
+]);
+
+const swapInteraction = normalizeInteraction({
+  target: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D", // Uniswap V2 Router
+  callData: uniswapRouterInterface.encodeFunctionData(
+    "swapExactTokensForTokens",
+    [
+      amountIn,
+      amountOutMin,
+      [tokenIn, tokenOut],
+      settlementContract,
+      deadline,
+    ]
+  ),
+});
+```
+
+### Sending Ether with Interaction
+
+```typescript
+import { normalizeInteraction } from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+const wethInterface = new ethers.utils.Interface([
+  "function deposit()",
+]);
+
+// Wrap ETH to WETH
+const wrapEthInteraction = normalizeInteraction({
+  target: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
+  value: ethers.utils.parseEther("1.0"), // Send 1 ETH
+  callData: wethInterface.encodeFunctionData("deposit"),
+});
+```
+
+### Using with SettlementEncoder
+
+```typescript
+import {
+  SettlementEncoder,
+  InteractionStage,
+  domain,
+} from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+const settlementDomain = domain(1, "0x9008D19f58AAbD9eD0D60971565AA8510560ab41");
+const encoder = new SettlementEncoder(settlementDomain);
+
+// Add pre-settlement interaction (e.g., permit)
+const permitInterface = new ethers.utils.Interface([
+  "function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)",
+]);
+
+encoder.encodeInteraction(
+  {
+    target: tokenAddress,
+    callData: permitInterface.encodeFunctionData("permit", [
+      owner,
+      spender,
+      amount,
+      deadline,
+      v,
+      r,
+      s,
+    ]),
+  },
+  InteractionStage.PRE
+);
+
+// Add intra-settlement interaction (e.g., AMM swap)
+const uniswapInterface = new ethers.utils.Interface([
+  "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline)",
+]);
+
+encoder.encodeInteraction(
+  {
+    target: uniswapRouter,
+    callData: uniswapInterface.encodeFunctionData("swapExactTokensForTokens", [
+      amountIn,
+      amountOutMin,
+      [tokenIn, tokenOut],
+      settlementContract,
+      deadline,
+    ]),
+  },
+  InteractionStage.INTRA // Default
+);
+
+// Add post-settlement interaction
+encoder.encodeInteraction(
+  {
+    target: cleanupContract,
+    callData: "0x...",
+  },
+  InteractionStage.POST
+);
+```
+
+## Interaction Stages
+
+Interactions can be executed at three different stages during settlement:
+
+1. **PRE**: Before any trading occurs
+   - Use for setup operations like permits
+   - No tokens have been transferred yet
+
+2. **INTRA**: After sell tokens are transferred in, before buy tokens are transferred out (default)
+   - Use for AMM interactions and swaps
+   - Settlement contract holds all sell tokens at this point
+
+3. **POST**: After all trading is complete
+   - Use for cleanup operations
+   - All trades have been executed
+
+<Info>
+When using `SettlementEncoder.encodeInteraction()`, interactions default to the `INTRA` stage if not specified.
+</Info>
+
+## Best Practices
+
+<Note>
+- Always validate the `target` address before creating an interaction
+- Use Ethers.js `Interface.encodeFunctionData()` to safely encode call data
+- Be careful with `value` - make sure the settlement contract has sufficient ETH balance
+- Test interactions thoroughly on testnets before mainnet deployment
+</Note>
+
+<Info>
+Interactions are executed in the order they are added to the encoder, within each stage. PRE interactions execute first, then INTRA, then POST.
+</Info>

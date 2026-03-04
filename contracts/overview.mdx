@@ -1,0 +1,210 @@
+---
+title: 'CoW Protocol Contracts Overview'
+description: 'Core architecture and components of the CoW Protocol smart contract system'
+---
+
+## Introduction
+
+CoW Protocol (Gnosis Protocol v2) is a decentralized trading protocol that leverages batch auctions and coincidence of wants to provide optimal trade execution. The protocol consists of three main contracts and several supporting libraries that work together to facilitate secure, efficient trading.
+
+## Architecture
+
+The CoW Protocol smart contract system is built on a modular architecture with clear separation of concerns:
+
+```
+GPv2Settlement (Main Contract)
+├── GPv2VaultRelayer (Vault Interaction)
+├── GPv2Authentication (Solver Authorization)
+├── GPv2Signing (Order Verification)
+├── ReentrancyGuard (Security)
+└── StorageAccessible (Storage Access)
+```
+
+## Core Components
+
+### GPv2Settlement
+
+The central settlement contract that orchestrates trade execution. It:
+- Validates and executes signed orders
+- Manages batch settlements at uniform clearing prices
+- Coordinates with Balancer Vault for token transfers
+- Emits trade and settlement events
+
+**Location**: `GPv2Settlement.sol`  
+**License**: LGPL-3.0-or-later  
+**Solidity Version**: `>=0.7.6 <0.9.0`
+
+### GPv2VaultRelayer
+
+A specialized relayer contract for interacting with Balancer Vault on behalf of users. It:
+- Transfers tokens from user accounts to the settlement contract
+- Executes Balancer batch swaps with fee collection
+- Provides isolation between user funds and settlement logic
+
+**Location**: `GPv2VaultRelayer.sol`
+
+### GPv2AllowListAuthentication
+
+Manages solver authorization through an allowlist mechanism. It:
+- Maintains a registry of authorized solvers
+- Provides manager-based access control
+- Supports EIP-1967 proxy pattern
+
+**Location**: `GPv2AllowListAuthentication.sol`
+
+## Key Libraries
+
+<AccordionGroup>
+  <Accordion title="GPv2Order">
+    Defines the order data structure and provides utilities for:
+    - EIP-712 order hashing
+    - Order UID packing and extraction
+    - Order parameter validation
+  </Accordion>
+
+  <Accordion title="GPv2Trade">
+    Handles trade encoding and decoding:
+    - Extracts order data from compact trade representation
+    - Decodes trade flags (order kind, fill type, balances, signing scheme)
+    - Maps token indices to actual token addresses
+  </Accordion>
+
+  <Accordion title="GPv2Interaction">
+    Enables arbitrary contract interactions during settlement:
+    - Execute pre-settlement, intra-settlement, and post-settlement hooks
+    - Support for ETH transfers and contract calls
+    - Gas-optimized execution
+  </Accordion>
+
+  <Accordion title="GPv2Signing">
+    Provides signature verification for multiple schemes:
+    - EIP-712 typed data signatures
+    - eth_sign signatures
+    - EIP-1271 smart contract signatures
+    - Pre-signed orders
+  </Accordion>
+</AccordionGroup>
+
+## Contract Deployment
+
+The contracts are deployed in the following order:
+
+1. **GPv2AllowListAuthentication** - Deploy first to establish solver authorization
+2. **GPv2Settlement** - Deploy with authenticator and Balancer Vault addresses
+3. **GPv2VaultRelayer** - Automatically deployed by GPv2Settlement constructor
+
+```solidity
+constructor(GPv2Authentication authenticator_, IVault vault_) {
+    authenticator = authenticator_;
+    vault = vault_;
+    vaultRelayer = new GPv2VaultRelayer(vault_);
+}
+```
+
+## Integration Patterns
+
+### Balancer Vault Integration
+
+CoW Protocol integrates deeply with Balancer Vault for:
+- **Token Management**: Using Vault's battle-tested token transfer logic
+- **Internal Balances**: Supporting Vault internal balance for gas optimization
+- **Batch Swaps**: Direct execution against Balancer liquidity pools
+
+<Note>
+  The protocol supports three token balance modes:
+  - **ERC20**: Standard token balances
+  - **External**: Balancer Vault external balances
+  - **Internal**: Balancer Vault internal balances
+</Note>
+
+### Settlement Flow
+
+The settlement process follows a three-phase interaction model:
+
+1. **Pre-interactions**: Execute before token transfers (e.g., approvals)
+2. **Settlement**: Transfer tokens in, execute swaps, transfer tokens out
+3. **Post-interactions**: Execute after settlement (e.g., cleanup)
+
+```solidity
+function settle(
+    IERC20[] calldata tokens,
+    uint256[] calldata clearingPrices,
+    GPv2Trade.Data[] calldata trades,
+    GPv2Interaction.Data[][3] calldata interactions
+) external nonReentrant onlySolver
+```
+
+## Security Features
+
+<CardGroup cols={2}>
+  <Card title="Reentrancy Protection" icon="shield">
+    All external entry points use `nonReentrant` modifier to prevent reentrancy attacks.
+  </Card>
+
+  <Card title="Solver Authorization" icon="key">
+    Only whitelisted solvers can execute settlements through the authenticator.
+  </Card>
+
+  <Card title="Order Validation" icon="check">
+    Comprehensive validation of order expiry, limit prices, and fill amounts.
+  </Card>
+
+  <Card title="Interaction Restrictions" icon="lock">
+    Forbidden interactions with vault relayer to protect user funds.
+  </Card>
+</CardGroup>
+
+## Events
+
+The settlement contract emits the following key events:
+
+```solidity
+// Emitted for each executed trade
+event Trade(
+    address indexed owner,
+    IERC20 sellToken,
+    IERC20 buyToken,
+    uint256 sellAmount,
+    uint256 buyAmount,
+    uint256 feeAmount,
+    bytes orderUid
+);
+
+// Emitted when settlement completes
+event Settlement(address indexed solver);
+
+// Emitted for each interaction
+event Interaction(address indexed target, uint256 value, bytes4 selector);
+
+// Emitted when order is invalidated
+event OrderInvalidated(address indexed owner, bytes orderUid);
+```
+
+## Gas Optimizations
+
+The contracts employ several gas optimization techniques:
+
+- **Assembly**: Low-level assembly for signature decoding and UID packing
+- **Storage Refunds**: Methods to free expired order storage for gas refunds
+- **Compact Encoding**: Trade flags encode multiple parameters in a single uint256
+- **Memory Reuse**: Pre-allocated buffers for order recovery
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Settlement Contract" icon="book" href="/contracts/settlement">
+    Learn about the main settlement contract
+  </Card>
+
+  <Card title="Vault Relayer" icon="book" href="/contracts/vault-relayer">
+    Understand the vault relayer mechanism
+  </Card>
+
+  <Card title="Authentication" icon="book" href="/contracts/authentication">
+    Explore solver authorization
+  </Card>
+
+  <Card title="Libraries" icon="book" href="/contracts/libraries">
+    Dive into core libraries
+  </Card>
+</CardGroup>

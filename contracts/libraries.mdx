@@ -1,0 +1,604 @@
+---
+title: 'Core Libraries'
+description: 'Essential libraries for order handling, trade execution, and interactions in CoW Protocol'
+---
+
+## Overview
+
+CoW Protocol uses several specialized libraries to handle order encoding, trade execution, signature verification, and contract interactions. These libraries are designed for gas efficiency and security, using low-level optimizations where appropriate.
+
+## GPv2Order
+
+The order library defines the complete order data structure and provides utilities for order handling.
+
+**Source**: `src/contracts/libraries/GPv2Order.sol`
+
+### Order Data Structure
+
+```solidity
+struct Data {
+    IERC20 sellToken;           // Token to sell
+    IERC20 buyToken;            // Token to buy
+    address receiver;           // Recipient of trade proceeds
+    uint256 sellAmount;         // Amount to sell
+    uint256 buyAmount;          // Amount to buy
+    uint32 validTo;             // Expiry timestamp
+    bytes32 appData;            // Application specific data
+    uint256 feeAmount;          // Protocol fee amount
+    bytes32 kind;               // Order kind (sell or buy)
+    bool partiallyFillable;     // Can be partially filled?
+    bytes32 sellTokenBalance;   // Sell token balance type
+    bytes32 buyTokenBalance;    // Buy token balance type
+}
+```
+
+### Constants
+
+<AccordionGroup>
+  <Accordion title="Type Hash">
+    The EIP-712 type hash for the order struct.
+    
+    ```solidity
+    bytes32 internal constant TYPE_HASH =
+        hex"d5a25ba2e97094ad7d83dc28a6572da797d6b3e7fc6663bd93efb789fc17e489";
+    ```
+    
+    Pre-computed from:
+    ```
+    keccak256(
+        "Order(" +
+            "address sellToken," +
+            "address buyToken," +
+            "address receiver," +
+            "uint256 sellAmount," +
+            "uint256 buyAmount," +
+            "uint32 validTo," +
+            "bytes32 appData," +
+            "uint256 feeAmount," +
+            "string kind," +
+            "bool partiallyFillable," +
+            "string sellTokenBalance," +
+            "string buyTokenBalance" +
+        ")"
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Order Kinds">
+    Markers for sell and buy orders.
+    
+    ```solidity
+    bytes32 internal constant KIND_SELL =
+        hex"f3b277728b3fee749481eb3e0b3b48980dbbab78658fc419025cb16eee346775";
+    
+    bytes32 internal constant KIND_BUY =
+        hex"6ed88e868af0a1983e3886d5f3e95a2fafbd6c3450bc229e27342283dc429ccc";
+    ```
+    
+    Pre-computed from `keccak256("sell")` and `keccak256("buy")`.
+  </Accordion>
+
+  <Accordion title="Balance Types">
+    Markers for different token balance sources.
+    
+    ```solidity
+    // Standard ERC20 balance
+    bytes32 internal constant BALANCE_ERC20 =
+        hex"5a28e9363bb942b639270062aa6bb295f434bcdfc42c97267bf003f272060dc9";
+    
+    // Balancer Vault external balance
+    bytes32 internal constant BALANCE_EXTERNAL =
+        hex"abee3b73373acd583a130924aad6dc38cfdc44ba0555ba94ce2ff63980ea0632";
+    
+    // Balancer Vault internal balance  
+    bytes32 internal constant BALANCE_INTERNAL =
+        hex"4ac99ace14ee0a5ef932dc609df0943ab7ac16b7583634612f8dc35a4289a6ce";
+    ```
+  </Accordion>
+
+  <Accordion title="Receiver Marker">
+    Special address indicating receiver is the order owner.
+    
+    ```solidity
+    address internal constant RECEIVER_SAME_AS_OWNER = address(0);
+    ```
+    
+    Chosen as `address(0)` for gas efficiency.
+  </Accordion>
+
+  <Accordion title="UID Length">
+    The byte length of an order unique identifier.
+    
+    ```solidity
+    uint256 internal constant UID_LENGTH = 56;
+    ```
+    
+    Format: `orderDigest (32) || owner (20) || validTo (4) = 56 bytes`
+  </Accordion>
+</AccordionGroup>
+
+### Key Functions
+
+#### actualReceiver
+
+Returns the actual receiver for an order, handling the special case where receiver is the owner.
+
+```solidity
+function actualReceiver(
+    Data memory order,
+    address owner
+) internal pure returns (address receiver)
+```
+
+<ParamField path="order" type="Data" required>
+  The order data
+</ParamField>
+
+<ParamField path="owner" type="address" required>
+  The order owner address
+</ParamField>
+
+#### hash
+
+Computes the EIP-712 signing hash for an order.
+
+```solidity
+function hash(
+    Data memory order,
+    bytes32 domainSeparator
+) internal pure returns (bytes32 orderDigest)
+```
+
+<ParamField path="order" type="Data" required>
+  The order to hash
+</ParamField>
+
+<ParamField path="domainSeparator" type="bytes32" required>
+  The EIP-712 domain separator
+</ParamField>
+
+<Note>
+  Uses inline assembly for gas-efficient EIP-712 struct hash computation.
+</Note>
+
+#### packOrderUidParams
+
+Packs order UID parameters into a bytes buffer.
+
+```solidity
+function packOrderUidParams(
+    bytes memory orderUid,
+    bytes32 orderDigest,
+    address owner,
+    uint32 validTo
+) internal pure
+```
+
+<ParamField path="orderUid" type="bytes" required>
+  Pre-allocated 56-byte buffer to pack into
+</ParamField>
+
+<ParamField path="orderDigest" type="bytes32" required>
+  The EIP-712 order hash
+</ParamField>
+
+<ParamField path="owner" type="address" required>
+  The order owner
+</ParamField>
+
+<ParamField path="validTo" type="uint32" required>
+  The order expiry timestamp
+</ParamField>
+
+#### extractOrderUidParams
+
+Extracts order information from a packed UID.
+
+```solidity
+function extractOrderUidParams(
+    bytes calldata orderUid
+)
+    internal
+    pure
+    returns (
+        bytes32 orderDigest,
+        address owner,
+        uint32 validTo
+    )
+```
+
+<ParamField path="orderUid" type="bytes" required>
+  The 56-byte order UID to unpack
+</ParamField>
+
+## GPv2Trade
+
+Handles trade encoding and decoding for compact settlement representation.
+
+**Source**: `src/contracts/libraries/GPv2Trade.sol`
+
+### Trade Data Structure
+
+```solidity
+struct Data {
+    uint256 sellTokenIndex;     // Index into tokens array
+    uint256 buyTokenIndex;      // Index into tokens array  
+    address receiver;           // Trade proceeds recipient
+    uint256 sellAmount;         // Sell amount
+    uint256 buyAmount;          // Buy amount
+    uint32 validTo;             // Order expiry
+    bytes32 appData;            // Application data
+    uint256 feeAmount;          // Protocol fee
+    uint256 flags;              // Packed order flags
+    uint256 executedAmount;     // Executed amount
+    bytes signature;            // Order signature
+}
+```
+
+### Trade Flags
+
+The `flags` field compactly encodes multiple order parameters:
+
+```
+bit | 31 ...   | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+----+----------+-------+---+-------+---+---+
+    | reserved | *   * | * | *   * | * | * |
+                 |   |   |   |   |   |   |
+                 |   |   |   |   |   |   +---- order kind (0=sell, 1=buy)
+                 |   |   |   |   |   +-------- partially fillable (0=fill-or-kill, 1=partial)
+                 |   |   |   +---+------------ sell token balance (00=ERC20, 10=external, 11=internal)
+                 |   |   +-------------------- buy token balance (0=ERC20, 1=internal)
+                 +---+------------------------ signature scheme (00=EIP-712, 01=eth_sign, 10=EIP-1271, 11=pre-sign)
+```
+
+### Functions
+
+#### extractOrder
+
+Extracts order data from a trade.
+
+```solidity
+function extractOrder(
+    Data calldata trade,
+    IERC20[] calldata tokens,
+    GPv2Order.Data memory order
+) internal pure returns (GPv2Signing.Scheme signingScheme)
+```
+
+<ParamField path="trade" type="Data" required>
+  The trade data
+</ParamField>
+
+<ParamField path="tokens" type="IERC20[]" required>
+  Token array for index resolution
+</ParamField>
+
+<ParamField path="order" type="GPv2Order.Data" required>
+  Memory location to write order data
+</ParamField>
+
+#### extractFlags
+
+Decodes trade flags into individual components.
+
+```solidity
+function extractFlags(
+    uint256 flags
+)
+    internal
+    pure
+    returns (
+        bytes32 kind,
+        bool partiallyFillable,
+        bytes32 sellTokenBalance,
+        bytes32 buyTokenBalance,
+        GPv2Signing.Scheme signingScheme
+    )
+```
+
+<ParamField path="flags" type="uint256" required>
+  The packed flags value
+</ParamField>
+
+## GPv2Interaction
+
+Enables arbitrary contract interactions during settlement.
+
+**Source**: `src/contracts/libraries/GPv2Interaction.sol`
+
+### Interaction Data Structure
+
+```solidity
+struct Data {
+    address target;    // Contract to call
+    uint256 value;     // ETH value to send
+    bytes callData;    // Call data
+}
+```
+
+### Functions
+
+#### execute
+
+Executes an arbitrary contract interaction.
+
+```solidity
+function execute(Data calldata interaction) internal
+```
+
+<ParamField path="interaction" type="Data" required>
+  The interaction to execute
+</ParamField>
+
+<Warning>
+  Uses inline assembly for gas optimization. Does not copy return data as it's discarded for interactions.
+</Warning>
+
+```solidity
+assembly {
+    let freeMemoryPointer := mload(0x40)
+    calldatacopy(freeMemoryPointer, callData.offset, callData.length)
+    if iszero(
+        call(
+            gas(),
+            target,
+            value,
+            freeMemoryPointer,
+            callData.length,
+            0,
+            0
+        )
+    ) {
+        returndatacopy(0, 0, returndatasize())
+        revert(0, returndatasize())
+    }
+}
+```
+
+#### selector
+
+Extracts the function selector from interaction calldata.
+
+```solidity
+function selector(
+    Data calldata interaction
+) internal pure returns (bytes4 result)
+```
+
+<ParamField path="interaction" type="Data" required>
+  The interaction data
+</ParamField>
+
+Returns the first 4 bytes of calldata, or `0x00000000` if calldata is shorter than 4 bytes.
+
+## GPv2Signing
+
+Provides signature verification for multiple signing schemes.
+
+**Source**: `src/contracts/mixins/GPv2Signing.sol`
+
+### Signing Schemes
+
+```solidity
+enum Scheme {
+    Eip712,   // EIP-712 typed data signatures
+    EthSign,  // eth_sign RPC signatures
+    Eip1271,  // Smart contract signatures
+    PreSign   // On-chain pre-signed orders
+}
+```
+
+### Domain Separator
+
+The contract computes an EIP-712 domain separator on construction:
+
+```solidity
+domainSeparator = keccak256(
+    abi.encode(
+        DOMAIN_TYPE_HASH,  // EIP712Domain type hash
+        DOMAIN_NAME,       // "Gnosis Protocol"
+        DOMAIN_VERSION,    // "v2"
+        chainId,           // Current chain ID
+        address(this)      // Verifying contract
+    )
+);
+```
+
+<Note>
+  The domain separator includes the contract address for replay protection across deployments.
+</Note>
+
+### Key Functions
+
+#### recoverOrderSigner
+
+Recovers an order's signer from the order data and signature.
+
+```solidity
+function recoverOrderSigner(
+    GPv2Order.Data memory order,
+    Scheme signingScheme,
+    bytes calldata signature
+) internal view returns (bytes32 orderDigest, address owner)
+```
+
+<ParamField path="order" type="GPv2Order.Data" required>
+  The order to verify
+</ParamField>
+
+<ParamField path="signingScheme" type="Scheme" required>
+  The signing scheme used
+</ParamField>
+
+<ParamField path="signature" type="bytes" required>
+  The signature bytes
+</ParamField>
+
+#### Signature Scheme Details
+
+<AccordionGroup>
+  <Accordion title="EIP-712 Signatures">
+    Standard ECDSA signatures over EIP-712 typed data.
+    
+    ```solidity
+    function recoverEip712Signer(
+        bytes32 orderDigest,
+        bytes calldata encodedSignature
+    ) internal pure returns (address owner)
+    ```
+    
+    Signature format: `r (32) || s (32) || v (1) = 65 bytes`
+  </Accordion>
+
+  <Accordion title="eth_sign Signatures">
+    ECDSA signatures from the eth_sign RPC method.
+    
+    ```solidity
+    function recoverEthsignSigner(
+        bytes32 orderDigest,
+        bytes calldata encodedSignature
+    ) internal pure returns (address owner)
+    ```
+    
+    Prefixes digest with: `"\x19Ethereum Signed Message:\n32"`
+  </Accordion>
+
+  <Accordion title="EIP-1271 Signatures">
+    Smart contract signatures via `isValidSignature()`.
+    
+    ```solidity
+    function recoverEip1271Signer(
+        bytes32 orderDigest,
+        bytes calldata encodedSignature
+    ) internal view returns (address owner)
+    ```
+    
+    Format: `owner (20) || signature (variable)`
+    
+    Calls `owner.isValidSignature(orderDigest, signature)` and verifies magic value.
+  </Accordion>
+
+  <Accordion title="Pre-Signed Orders">
+    On-chain pre-authorization via `setPreSignature()`.
+    
+    ```solidity
+    function recoverPreSigner(
+        bytes32 orderDigest,
+        bytes calldata encodedSignature,
+        uint32 validTo
+    ) internal view returns (address owner)
+    ```
+    
+    Format: `owner (20)`
+    
+    Checks `preSignature[orderUid] == PRE_SIGNED`
+  </Accordion>
+</AccordionGroup>
+
+#### setPreSignature
+
+Pre-signs an order on-chain.
+
+```solidity
+function setPreSignature(
+    bytes calldata orderUid,
+    bool signed
+) external
+```
+
+<ParamField path="orderUid" type="bytes" required>
+  The order UID to pre-sign
+</ParamField>
+
+<ParamField path="signed" type="bool" required>
+  `true` to enable, `false` to revoke
+</ParamField>
+
+## Usage Examples
+
+### Creating an Order
+
+```solidity
+GPv2Order.Data memory order = GPv2Order.Data({
+    sellToken: IERC20(wethAddress),
+    buyToken: IERC20(usdcAddress),
+    receiver: address(0),  // Same as owner
+    sellAmount: 1 ether,
+    buyAmount: 2000e6,
+    validTo: uint32(block.timestamp + 1 hours),
+    appData: bytes32(0),
+    feeAmount: 0.003 ether,
+    kind: GPv2Order.KIND_SELL,
+    partiallyFillable: false,
+    sellTokenBalance: GPv2Order.BALANCE_ERC20,
+    buyTokenBalance: GPv2Order.BALANCE_ERC20
+});
+
+// Compute order hash
+bytes32 orderDigest = order.hash(domainSeparator);
+
+// Pack order UID
+bytes memory orderUid = new bytes(GPv2Order.UID_LENGTH);
+orderUid.packOrderUidParams(orderDigest, owner, order.validTo);
+```
+
+### Decoding Trade Flags
+
+```solidity
+// Encode flags: sell order, fill-or-kill, ERC20 balances, EIP-712 signature
+uint256 flags = 0x00; // All defaults
+
+// Decode flags
+(
+    bytes32 kind,
+    bool partiallyFillable,
+    bytes32 sellTokenBalance,
+    bytes32 buyTokenBalance,
+    GPv2Signing.Scheme signingScheme
+) = GPv2Trade.extractFlags(flags);
+
+assert(kind == GPv2Order.KIND_SELL);
+assert(partiallyFillable == false);
+assert(signingScheme == GPv2Signing.Scheme.Eip712);
+```
+
+### Creating Interactions
+
+```solidity
+// Pre-settlement: Approve tokens
+GPv2Interaction.Data memory approveInteraction = GPv2Interaction.Data({
+    target: tokenAddress,
+    value: 0,
+    callData: abi.encodeWithSignature(
+        "approve(address,uint256)",
+        spenderAddress,
+        type(uint256).max
+    )
+});
+
+// Post-settlement: Withdraw ETH
+GPv2Interaction.Data memory withdrawInteraction = GPv2Interaction.Data({
+    target: wethAddress,
+    value: 0,
+    callData: abi.encodeWithSignature(
+        "withdraw(uint256)",
+        amountToWithdraw
+    )
+});
+```
+
+## Gas Optimizations
+
+These libraries employ several gas optimization techniques:
+
+- **Inline Assembly**: Used for ECDSA recovery, UID packing, and interactions
+- **Memory Layout**: Careful memory management to avoid unnecessary copies
+- **Pre-computed Hashes**: Constants for EIP-712 hashes computed at compile time
+- **Compact Encoding**: Trade flags pack multiple parameters in a single uint256
+- **Calldata**: Extensive use of calldata instead of memory for read-only data
+
+## Related Documentation
+
+- [GPv2Settlement](/contracts/settlement) - Main contract using these libraries
+- [GPv2VaultRelayer](/contracts/vault-relayer) - Uses GPv2Transfer library
+- [GPv2AllowListAuthentication](/contracts/authentication) - Solver authorization

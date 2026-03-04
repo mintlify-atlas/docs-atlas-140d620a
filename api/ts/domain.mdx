@@ -1,0 +1,83 @@
+---
+title: "Domain"
+description: "EIP-712 domain utilities for CoW Protocol order signing"
+---
+
+The domain module provides utilities for creating EIP-712 typed data domains used for signing CoW Protocol orders.
+
+## domain
+
+Returns the Gnosis Protocol v2 domain used for signing orders.
+
+```typescript
+function domain(
+  chainId: number,
+  verifyingContract: string
+): TypedDataDomain
+```
+
+<ParamField path="chainId" type="number" required>
+  The EIP-155 chain ID where the contract is deployed.
+</ParamField>
+
+<ParamField path="verifyingContract" type="string" required>
+  The address of the GPv2Settlement contract that will verify the signature.
+</ParamField>
+
+<ResponseField name="TypedDataDomain" type="TypedDataDomain">
+  An EIP-712 compatible typed domain data structure containing:
+  - `name`: "Gnosis Protocol"
+  - `version`: "v2"
+  - `chainId`: The provided chain ID
+  - `verifyingContract`: The settlement contract address
+</ResponseField>
+
+### Example
+
+```typescript
+import { domain } from "@cowprotocol/contracts";
+
+// Create domain for Ethereum mainnet
+const settlementDomain = domain(
+  1, // Ethereum mainnet chain ID
+  "0x9008D19f58AAbD9eD0D60971565AA8510560ab41" // GPv2Settlement address
+);
+```
+
+<Info>
+The domain is used throughout the SDK to ensure orders cannot be replayed across different chains or contract deployments. It's mixed into all EIP-712 signatures.
+</Info>
+
+## TypedDataDomain
+
+EIP-712 typed data domain structure.
+
+```typescript
+interface TypedDataDomain {
+  name?: string;
+  version?: string;
+  chainId?: number;
+  verifyingContract?: string;
+  salt?: string;
+}
+```
+
+<ParamField path="name" type="string" optional>
+  The user-readable name of the signing domain.
+</ParamField>
+
+<ParamField path="version" type="string" optional>
+  The current version of the signing domain.
+</ParamField>
+
+<ParamField path="chainId" type="number" optional>
+  The EIP-155 chain ID.
+</ParamField>
+
+<ParamField path="verifyingContract" type="string" optional>
+  The address of the contract that will verify the signature.
+</ParamField>
+
+<ParamField path="salt" type="string" optional>
+  A disambiguating salt for the protocol.
+</ParamField>

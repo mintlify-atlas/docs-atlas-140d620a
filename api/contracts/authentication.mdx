@@ -1,0 +1,256 @@
+---
+title: GPv2Authentication
+description: Authentication contracts for managing solver authorization in Gnosis Protocol v2
+---
+
+The authentication system in Gnosis Protocol v2 controls which addresses are authorized to submit settlements. This ensures only trusted solvers can execute trades.
+
+## GPv2Authentication Interface
+
+```solidity
+interface GPv2Authentication
+```
+
+The base authentication interface that all authentication implementations must follow.
+
+### Functions
+
+#### isSolver
+
+```solidity
+function isSolver(address prospectiveSolver) external view returns (bool)
+```
+
+Determines whether the provided address is an authenticated solver.
+
+<ParamField path="prospectiveSolver" type="address">
+  The address of the prospective solver to check
+</ParamField>
+
+<ResponseField name="returns" type="bool">
+  `true` when the address is an authenticated solver, `false` otherwise
+</ResponseField>
+
+## GPv2AllowListAuthentication
+
+```solidity
+contract GPv2AllowListAuthentication is
+    GPv2Authentication,
+    Initializable,
+    StorageAccessible
+```
+
+The allowlist-based authentication contract that maintains a list of authorized solvers. This implementation provides manager-based access control for adding and removing solvers.
+
+### Inheritance
+
+- `GPv2Authentication`: Implements the base authentication interface
+- `Initializable`: Supports initialization for proxy patterns
+- `StorageAccessible`: Allows reading contract storage
+
+### State Variables
+
+#### manager
+
+```solidity
+address public manager
+```
+
+The address of the manager that has permissions to add and remove solvers. The manager has privileged access to modify the solver list.
+
+#### solvers
+
+```solidity
+mapping(address => bool) private solvers
+```
+
+The set of allowed solvers. Authorized solvers have a value of `true` in this mapping.
+
+### Events
+
+#### ManagerChanged
+
+```solidity
+event ManagerChanged(address newManager, address oldManager)
+```
+
+Emitted when the manager address changes.
+
+<ParamField path="newManager" type="address">
+  The new manager address
+</ParamField>
+
+<ParamField path="oldManager" type="address">
+  The previous manager address
+</ParamField>
+
+#### SolverAdded
+
+```solidity
+event SolverAdded(address solver)
+```
+
+Emitted when a solver is added to the allowlist.
+
+<ParamField path="solver" type="address">
+  The solver address that was added
+</ParamField>
+
+#### SolverRemoved
+
+```solidity
+event SolverRemoved(address solver)
+```
+
+Emitted when a solver is removed from the allowlist.
+
+<ParamField path="solver" type="address">
+  The solver address that was removed
+</ParamField>
+
+### Modifiers
+
+#### onlyManager
+
+```solidity
+modifier onlyManager()
+```
+
+Ensures a method can only be called by the contract manager. Reverts with "GPv2: caller not manager" if called by other addresses.
+
+#### onlyManagerOrOwner
+
+```solidity
+modifier onlyManagerOrOwner()
+```
+
+Ensures a method can be called by either the contract manager or the proxy owner. This modifier assumes the proxy uses an EIP-1967 compliant storage slot for the admin.
+
+<Info>
+The proxy owner can always override manager permissions, providing a safety mechanism for contract administration.
+</Info>
+
+### Functions
+
+#### initializeManager
+
+```solidity
+function initializeManager(address manager_) external initializer
+```
+
+Initializes the manager to a value. This method is a contract initializer that is called exactly once after creation.
+
+<ParamField path="manager_" type="address">
+  The manager address to initialize the contract with
+</ParamField>
+
+<Note>
+An initializer is used instead of a constructor so this contract can be used behind a proxy. This initializer is idempotent and can only be called once.
+</Note>
+
+#### setManager
+
+```solidity
+function setManager(address manager_) external onlyManagerOrOwner
+```
+
+Sets the manager for this contract. Can be called by the current manager (to relinquish the role) or the contract owner (the proxy admin).
+
+<ParamField path="manager_" type="address">
+  The new contract manager address
+</ParamField>
+
+#### addSolver
+
+```solidity
+function addSolver(address solver) external onlyManager
+```
+
+Adds an address to the set of allowed solvers. This method can only be called by the contract manager.
+
+<ParamField path="solver" type="address">
+  The solver address to add to the allowlist
+</ParamField>
+
+<Info>
+This function is idempotent. Adding an already-authorized solver has no effect but still emits the `SolverAdded` event.
+</Info>
+
+#### removeSolver
+
+```solidity
+function removeSolver(address solver) external onlyManager
+```
+
+Removes an address from the set of allowed solvers. This method can only be called by the contract manager.
+
+<ParamField path="solver" type="address">
+  The solver address to remove from the allowlist
+</ParamField>
+
+<Info>
+This function is idempotent. Removing an already-unauthorized solver has no effect but still emits the `SolverRemoved` event.
+</Info>
+
+#### isSolver
+
+```solidity
+function isSolver(
+    address prospectiveSolver
+) external view override returns (bool)
+```
+
+Implements the `GPv2Authentication` interface. Returns whether an address is an authorized solver.
+
+<ParamField path="prospectiveSolver" type="address">
+  The address to check
+</ParamField>
+
+<ResponseField name="returns" type="bool">
+  `true` if the address is an authorized solver, `false` otherwise
+</ResponseField>
+
+## Usage Example
+
+```solidity
+// Deploy authentication contract behind a proxy
+GPv2AllowListAuthentication auth = new GPv2AllowListAuthentication();
+
+// Initialize with manager
+auth.initializeManager(managerAddress);
+
+// Manager adds a solver
+auth.addSolver(solverAddress);
+
+// Check if address is authorized
+bool isAuthorized = auth.isSolver(solverAddress); // returns true
+
+// Manager removes a solver
+auth.removeSolver(solverAddress);
+
+// Transfer manager role
+auth.setManager(newManagerAddress);
+```
+
+## Access Control Summary
+
+| Function | Manager | Proxy Owner |
+|----------|---------|-------------|
+| `initializeManager` | - | Anyone (once) |
+| `setManager` | ✓ | ✓ |
+| `addSolver` | ✓ | - |
+| `removeSolver` | ✓ | - |
+| `isSolver` | Anyone (view) | Anyone (view) |
+
+## Security Considerations
+
+<Warning>
+The manager has significant power to control protocol access. The manager role should be:
+- Assigned to a multi-sig wallet or DAO
+- Monitored for unauthorized changes
+- Protected with time-locks for critical operations
+</Warning>
+
+<Info>
+The proxy owner can override manager permissions, providing an emergency escape hatch if the manager becomes compromised or unavailable.
+</Info>

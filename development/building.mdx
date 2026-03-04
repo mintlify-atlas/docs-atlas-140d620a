@@ -1,0 +1,196 @@
+---
+title: Building the Project
+description: Learn how to build the CoW Protocol Contracts project including Solidity contracts and TypeScript bindings
+---
+
+## Overview
+
+The CoW Protocol Contracts project uses a hybrid build system that compiles both Solidity smart contracts and TypeScript bindings. The build process is managed through npm scripts and uses Hardhat as the development environment.
+
+<Note>
+  This repository is migrating to Foundry. For Hardhat-based development, refer to the [v1 branch](https://github.com/cowprotocol/contracts/tree/v1).
+</Note>
+
+## Prerequisites
+
+Before building the project, ensure you have:
+
+- Node.js (v16 or higher recommended)
+- Yarn package manager
+- Git
+
+## Installation
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/cowprotocol/contracts.git
+    cd contracts
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    yarn
+    ```
+  </Step>
+
+  <Step title="Build the project">
+    ```bash
+    yarn build
+    ```
+  </Step>
+</Steps>
+
+## Build Commands
+
+The project provides several build commands for different purposes:
+
+<CodeGroup>
+```bash Full Build
+yarn build
+```
+
+```bash Solidity Only
+yarn build:sol
+```
+
+```bash TypeScript Only
+yarn build:ts
+```
+</CodeGroup>
+
+### Build Script Details
+
+#### `yarn build`
+
+Executes the complete build process:
+1. Compiles Solidity contracts with Hardhat
+2. Generates TypeScript bindings
+3. Compiles TypeScript in three configurations (ESM, CommonJS, and default)
+
+This is equivalent to running:
+```bash
+yarn build:sol && yarn build:ts
+```
+
+#### `yarn build:sol`
+
+Compiles all Solidity smart contracts using Hardhat with the `--force` flag to ensure a clean build:
+```bash
+hardhat compile --force
+```
+
+The Solidity compiler settings are optimized for production:
+- **Optimizer**: Enabled
+- **Optimizer runs**: 1,000,000
+- **EVM version**: Cancun
+- **IR compilation**: Disabled
+
+#### `yarn build:ts`
+
+Compiles TypeScript files in multiple module formats:
+```bash
+tsc && tsc -p tsconfig.lib.esm.json && tsc -p tsconfig.lib.commonjs.json
+```
+
+This generates:
+- Default TypeScript output
+- ESM (ECMAScript Modules) build in `lib/esm/`
+- CommonJS build in `lib/commonjs/`
+
+## Compiler Configuration
+
+The project uses Foundry's configuration system with settings optimized for gas efficiency:
+
+```toml
+[profile.default]
+src = "src"
+out = "out"
+libs = ["node_modules", "lib"]
+
+via_ir = false
+optimizer = true
+optimizer_runs = 1000000
+evm_version = "cancun"
+```
+
+<Warning>
+  The optimizer is configured with 1,000,000 runs, which prioritizes minimal gas costs for contract execution over deployment costs.
+</Warning>
+
+## Output Structure
+
+After a successful build, you'll find:
+
+- **Compiled contracts**: `out/` directory (Foundry) or contract artifacts
+- **TypeScript ESM**: `lib/esm/` directory
+- **TypeScript CommonJS**: `lib/commonjs/` directory
+- **Type definitions**: `.d.ts` files alongside compiled JavaScript
+
+## Linting
+
+The project includes comprehensive linting for both Solidity and TypeScript:
+
+<CodeGroup>
+```bash All Linting
+yarn lint
+```
+
+```bash Solidity Source
+yarn lint:sol:src
+```
+
+```bash Solidity Tests
+yarn lint:sol:test
+```
+
+```bash TypeScript
+yarn lint:ts
+```
+</CodeGroup>
+
+## Formatting
+
+Code formatting is available for both Solidity and TypeScript:
+
+```bash
+# Format Solidity contracts
+yarn fmt:sol
+
+# Format TypeScript files
+yarn fmt:ts
+```
+
+## Troubleshooting
+
+### Build Failures
+
+If you encounter build errors:
+
+1. **Clean the build artifacts**:
+   ```bash
+   rm -rf out/ lib/ cache/
+   ```
+
+2. **Reinstall dependencies**:
+   ```bash
+   rm -rf node_modules/
+   yarn
+   ```
+
+3. **Force rebuild**:
+   ```bash
+   yarn build:sol
+   yarn build:ts
+   ```
+
+### Compiler Version Issues
+
+Ensure your Solidity compiler version matches the project requirements. The project uses Hardhat's built-in compiler management.
+
+## Next Steps
+
+- [Run tests](/development/testing) to verify your build
+- [Benchmark performance](/development/benchmarking) of the contracts
+- Review the [deployment documentation](/deployment/networks) for deploying contracts

@@ -1,0 +1,120 @@
+---
+title: "TypeScript SDK Overview"
+description: "Introduction to the CoW Protocol TypeScript SDK for creating and managing orders"
+---
+
+## Introduction
+
+The CoW Protocol TypeScript SDK provides a comprehensive set of utilities for interacting with Gnosis Protocol v2 (CoW Protocol) smart contracts. This SDK enables developers to:
+
+- Create and sign orders
+- Encode settlements
+- Manage interactions with the protocol
+- Handle order execution and validation
+
+## Installation
+
+```bash
+npm install @cowprotocol/contracts
+```
+
+## Core Modules
+
+The SDK is organized into several key modules:
+
+<CardGroup cols={2}>
+  <Card title="Orders" icon="file-contract" href="/sdk/orders">
+    Create and manage CoW Protocol orders with type-safe interfaces
+  </Card>
+  
+  <Card title="Signing" icon="signature" href="/sdk/signing">
+    Sign orders using EIP-712, EthSign, EIP-1271, or PreSign schemes
+  </Card>
+  
+  <Card title="Settlement" icon="scale-balanced" href="/sdk/settlement">
+    Encode settlements and manage trade execution
+  </Card>
+  
+  <Card title="Interactions" icon="arrows-split-up-and-left" href="/sdk/interactions">
+    Create pre, intra, and post-settlement interactions
+  </Card>
+</CardGroup>
+
+## Quick Start
+
+### Creating a Domain
+
+Every order must be signed with an EIP-712 domain to prevent replay attacks across different chains and contract deployments:
+
+```typescript
+import { domain } from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+// Create domain for mainnet
+const settlementContract = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
+const gpv2Domain = domain(1, settlementContract);
+```
+
+### Creating an Order
+
+```typescript
+import { Order, OrderKind, OrderBalance } from "@cowprotocol/contracts";
+
+const order: Order = {
+  sellToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
+  buyToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",  // USDC
+  sellAmount: ethers.utils.parseEther("1"),
+  buyAmount: ethers.utils.parseUnits("3000", 6),
+  validTo: Math.floor(Date.now() / 1000) + 3600, // 1 hour
+  appData: 0,
+  feeAmount: ethers.utils.parseEther("0.001"),
+  kind: OrderKind.SELL,
+  partiallyFillable: false,
+  sellTokenBalance: OrderBalance.ERC20,
+  buyTokenBalance: OrderBalance.ERC20,
+};
+```
+
+### Signing an Order
+
+```typescript
+import { signOrder, SigningScheme } from "@cowprotocol/contracts";
+
+const wallet = ethers.Wallet.createRandom();
+const signature = await signOrder(
+  gpv2Domain,
+  order,
+  wallet,
+  SigningScheme.EIP712
+);
+
+console.log("Signature:", signature);
+```
+
+## TypeScript Support
+
+The SDK is written in TypeScript and provides full type definitions for all interfaces, enums, and functions. This ensures type safety and excellent IDE support with autocompletion and inline documentation.
+
+## ethers.js Integration
+
+The SDK is built on top of [ethers.js v5](https://docs.ethers.org/v5/) and seamlessly integrates with ethers providers, signers, and utilities. All addresses, amounts, and bytes are represented using ethers.js types:
+
+- `BigNumberish` - For amounts and numeric values
+- `BytesLike` - For signatures and calldata
+- `string` - For addresses (checksummed)
+
+<Note>
+  Make sure you have `ethers` version 5.x installed as a peer dependency.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Order Interface" icon="file-lines" href="/sdk/orders">
+    Learn about the Order interface and related types
+  </Card>
+  
+  <Card title="Settlement Encoding" icon="code" href="/sdk/settlement">
+    Encode settlements for solver execution
+  </Card>
+</CardGroup>

@@ -1,0 +1,202 @@
+---
+title: GPv2VaultRelayer
+description: Relayer contract for interacting with Balancer Vault on behalf of users
+---
+
+The `GPv2VaultRelayer` contract acts as an intermediary between the settlement contract and the Balancer Vault, enabling the protocol to transfer funds from user accounts and execute swaps with fees.
+
+## Contract Overview
+
+```solidity
+contract GPv2VaultRelayer
+```
+
+This contract is created by the `GPv2Settlement` contract during deployment and has special permissions to interact with the Balancer Vault on behalf of users.
+
+## State Variables
+
+### creator
+
+```solidity
+address private immutable creator
+```
+
+The address of the contract creator, which has special permissions to call privileged functions. This value is set at creation time (to the settlement contract address) and cannot change.
+
+### vault
+
+```solidity
+IVault private immutable vault
+```
+
+The Balancer Vault instance this relayer interacts with.
+
+## Constructor
+
+```solidity
+constructor(IVault vault_)
+```
+
+Initializes the vault relayer with a Balancer Vault instance.
+
+<ParamField path="vault_" type="IVault">
+  The Balancer Vault to relay transactions to
+</ParamField>
+
+<Info>
+The `msg.sender` during construction (the settlement contract) becomes the creator with exclusive access to relayer functions.
+</Info>
+
+## Modifiers
+
+### onlyCreator
+
+```solidity
+modifier onlyCreator()
+```
+
+Ensures that a function can only be called by the creator of this contract. Reverts with "GPv2: not creator" if called by other addresses.
+
+## Functions
+
+### transferFromAccounts
+
+```solidity
+function transferFromAccounts(
+    GPv2Transfer.Data[] calldata transfers
+) external onlyCreator
+```
+
+Transfers all sell amounts for executed trades from their owners to the caller (settlement contract).
+
+<ParamField path="transfers" type="GPv2Transfer.Data[]">
+  Array of transfer data specifying accounts, tokens, amounts, and balance types
+</ParamField>
+
+<Warning>
+This function reverts if:
+- The caller is not the creator of the vault relayer
+- Any ERC20 transfer fails
+</Warning>
+
+#### Example
+
+```solidity
+// Transfer data for a user selling 100 USDC
+GPv2Transfer.Data memory transfer = GPv2Transfer.Data({
+    account: 0x1234...,
+    token: IERC20(USDC_ADDRESS),
+    amount: 100e6,
+    balance: GPv2Order.BALANCE_ERC20
+});
+```
+
+### batchSwapWithFee
+
+```solidity
+function batchSwapWithFee(
+    IVault.SwapKind kind,
+    IVault.BatchSwapStep[] calldata swaps,
+    IERC20[] memory tokens,
+    IVault.FundManagement memory funds,
+    int256[] memory limits,
+    uint256 deadline,
+    GPv2Transfer.Data calldata feeTransfer
+) external onlyCreator returns (int256[] memory tokenDeltas)
+```
+
+Performs a Balancer batched swap on behalf of a user and transfers a fee to the caller.
+
+<ParamField path="kind" type="IVault.SwapKind">
+  The Balancer swap kind: `GIVEN_IN` for sell orders or `GIVEN_OUT` for buy orders
+</ParamField>
+
+<ParamField path="swaps" type="IVault.BatchSwapStep[]">
+  The swap steps to perform through Balancer pools
+</ParamField>
+
+<ParamField path="tokens" type="IERC20[]">
+  The tokens involved in the swaps. Swaps encode token addresses as indices into this array.
+</ParamField>
+
+<ParamField path="funds" type="IVault.FundManagement">
+  Fund management settings specifying the user the swap is performed for and the recipient of proceeds
+</ParamField>
+
+<ParamField path="limits" type="int256[]">
+  Swap limits for encoding limit prices. Positive values limit maximum amounts sent, negative values limit minimum amounts received.
+</ParamField>
+
+<ParamField path="deadline" type="uint256">
+  The timestamp deadline for the swap. Reverts if the swap is executed after this time.
+</ParamField>
+
+<ParamField path="feeTransfer" type="GPv2Transfer.Data">
+  The transfer data for the protocol fee to be collected
+</ParamField>
+
+<ResponseField name="tokenDeltas" type="int256[]">
+  The executed swap amounts. Positive values represent tokens sent, negative values represent tokens received.
+</ResponseField>
+
+<Warning>
+This function reverts if:
+- The caller is not the creator of the vault relayer
+- The swap fails (e.g., insufficient liquidity, slippage exceeded)
+- The fee transfer fails
+</Warning>
+
+#### Swap Kind
+
+The `SwapKind` parameter determines the swap behavior:
+
+- **`GIVEN_IN`**: For sell orders. The exact amount of tokens to sell is specified, and the contract calculates the amount received.
+- **`GIVEN_OUT`**: For buy orders. The exact amount of tokens to receive is specified, and the contract calculates the amount to send.
+
+#### Example
+
+```solidity
+// Sell 1 ETH for USDC with minimum 1800 USDC received
+IVault.SwapKind kind = IVault.SwapKind.GIVEN_IN;
+
+IVault.BatchSwapStep[] memory swaps = new IVault.BatchSwapStep[](1);
+swaps[0] = IVault.BatchSwapStep({
+    poolId: BALANCER_POOL_ID,
+    assetInIndex: 0,  // ETH index
+    assetOutIndex: 1, // USDC index
+    amount: 1 ether,
+    userData: ""
+});
+
+int256[] memory limits = new int256[](2);
+limits[0] = int256(1 ether);      // Max ETH to send
+limits[1] = -int256(1800e6);      // Min USDC to receive
+
+IVault.FundManagement memory funds = IVault.FundManagement({
+    sender: userAddress,
+    fromInternalBalance: false,
+    recipient: payable(userAddress),
+    toInternalBalance: false
+});
+```
+
+## Integration Notes
+
+<Info>
+The vault relayer is automatically created by the settlement contract. Users do not interact with it directly.
+</Info>
+
+### Balance Types
+
+The relayer supports three types of token balances through the Balancer Vault:
+
+1. **ERC20 Balance** (`BALANCE_ERC20`): Direct token transfers using standard ERC20 allowances
+2. **External Balance** (`BALANCE_EXTERNAL`): Balancer Vault external balances (reuses Vault approvals)
+3. **Internal Balance** (`BALANCE_INTERNAL`): Balancer Vault internal balances (tokens already deposited in Vault)
+
+### Security
+
+The vault relayer has restricted access:
+- Only the creator (settlement contract) can call its functions
+- The settlement contract explicitly prevents interactions targeting the vault relayer to protect user funds
+- All transfers require proper user approvals set through the Balancer Vault

@@ -1,0 +1,517 @@
+---
+title: "Settlement"
+description: "Encode settlements and manage trade execution with the CoW Protocol SDK"
+---
+
+## Overview
+
+The settlement module provides tools for encoding trades, interactions, and prices into the format required by the CoW Protocol settlement contract. The `SettlementEncoder` class is the primary interface for building settlement calldata.
+
+## SettlementEncoder Class
+
+The `SettlementEncoder` class manages the encoding of orders, interactions, and prices into settlement calldata:
+
+```typescript
+export class SettlementEncoder {
+  constructor(public readonly domain: TypedDataDomain);
+  
+  // Token management
+  get tokens(): string[];
+  
+  // Trade management
+  get trades(): Trade[];
+  encodeTrade(order: Order, signature: Signature, execution?: Partial<TradeExecution>): void;
+  signEncodeTrade(order: Order, owner: Signer, scheme: EcdsaSigningScheme, execution?: Partial<TradeExecution>): Promise<void>;
+  
+  // Interaction management
+  get interactions(): [Interaction[], Interaction[], Interaction[]];
+  encodeInteraction(interaction: InteractionLike, stage?: InteractionStage): void;
+  
+  // Price and settlement encoding
+  clearingPrices(prices: Prices): BigNumberish[];
+  encodedSettlement(prices: Prices): EncodedSettlement;
+  
+  // Static helpers
+  static encodedSetup(...interactions: InteractionLike[]): EncodedSettlement;
+}
+```
+
+### Constructor
+
+<ParamField path="domain" type="TypedDataDomain" required>
+  The EIP-712 domain for signing orders. Used to ensure orders are valid for the specific settlement contract and chain.
+</ParamField>
+
+<CodeGroup>
+```typescript Example
+import { SettlementEncoder, domain } from "@cowprotocol/contracts";
+
+const settlementContract = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
+const encoder = new SettlementEncoder(domain(1, settlementContract));
+```
+</CodeGroup>
+
+## Encoding Trades
+
+### encodeTrade
+
+Adds a signed order to the settlement:
+
+```typescript
+encodeTrade(
+  order: Order,
+  signature: Signature,
+  execution?: Partial<TradeExecution>
+): void
+```
+
+<ParamField path="order" type="Order" required>
+  The order to encode.
+</ParamField>
+
+<ParamField path="signature" type="Signature" required>
+  The order signature (ECDSA, EIP-1271, or PreSign).
+</ParamField>
+
+<ParamField path="execution" type="Partial<TradeExecution>">
+  Trade execution details. Required for partially fillable orders.
+</ParamField>
+
+<CodeGroup>
+```typescript Example
+import { signOrder, SigningScheme } from "@cowprotocol/contracts";
+
+// Sign the order
+const signature = await signOrder(
+  encoder.domain,
+  order,
+  wallet,
+  SigningScheme.EIP712
+);
+
+// Encode the trade
+encoder.encodeTrade(order, signature);
+
+// For partially fillable orders, specify executed amount
+encoder.encodeTrade(partialOrder, signature, {
+  executedAmount: ethers.utils.parseEther("0.5"),
+});
+```
+</CodeGroup>
+
+### signEncodeTrade
+
+Signs an order and encodes it in one step:
+
+```typescript
+async signEncodeTrade(
+  order: Order,
+  owner: Signer,
+  scheme: EcdsaSigningScheme,
+  execution?: Partial<TradeExecution>
+): Promise<void>
+```
+
+<CodeGroup>
+```typescript Example
+// Sign and encode in one call
+await encoder.signEncodeTrade(
+  order,
+  wallet,
+  SigningScheme.EIP712
+);
+
+// With partial fill
+await encoder.signEncodeTrade(
+  partialOrder,
+  wallet,
+  SigningScheme.EIP712,
+  { executedAmount: ethers.utils.parseEther("0.5") }
+);
+```
+</CodeGroup>
+
+## Trade Interface
+
+The encoded trade format used by the settlement contract:
+
+```typescript
+export interface Trade {
+  sellTokenIndex: BigNumberish;  // Index in the token array
+  buyTokenIndex: BigNumberish;   // Index in the token array
+  receiver: string;              // Address to receive buy tokens
+  sellAmount: BigNumberish;      // Order sell amount
+  buyAmount: BigNumberish;       // Order buy amount
+  validTo: number;               // Unix timestamp
+  appData: string;               // 32-byte hash
+  feeAmount: BigNumberish;       // Protocol fee
+  flags: BigNumberish;           // Encoded trade flags
+  executedAmount: BigNumberish;  // Executed amount for partial fills
+  signature: BytesLike;          // Encoded signature
+}
+```
+
+### TradeExecution
+
+```typescript
+export interface TradeExecution {
+  executedAmount: BigNumberish;
+}
+```
+
+<ParamField path="executedAmount" type="BigNumberish" required>
+  The amount executed in this trade:
+  - **Partially fillable sell orders**: Amount of sell tokens to trade
+  - **Partially fillable buy orders**: Amount of buy tokens to trade
+  - **Fill-or-kill orders**: Ignored (set to 0)
+</ParamField>
+
+## Flag Encoding
+
+### Trade Flags
+
+Trade flags encode order and signature information into a single bitfield:
+
+```typescript
+export interface TradeFlags {
+  kind: OrderKind;                    // Sell or buy
+  partiallyFillable: boolean;         // Partial fill allowed
+  sellTokenBalance: OrderBalance;     // Sell token source
+  buyTokenBalance: OrderBalance;      // Buy token destination
+  signingScheme: SigningScheme;       // Signature type
+}
+```
+
+### encodeTradeFlags
+
+```typescript
+export function encodeTradeFlags(flags: TradeFlags): number
+```
+
+<CodeGroup>
+```typescript Example
+import {
+  encodeTradeFlags,
+  OrderKind,
+  OrderBalance,
+  SigningScheme,
+} from "@cowprotocol/contracts";
+
+const flags = encodeTradeFlags({
+  kind: OrderKind.SELL,
+  partiallyFillable: false,
+  sellTokenBalance: OrderBalance.ERC20,
+  buyTokenBalance: OrderBalance.ERC20,
+  signingScheme: SigningScheme.EIP712,
+});
+
+console.log("Encoded flags:", flags); // Output: 0
+```
+</CodeGroup>
+
+### decodeTradeFlags
+
+```typescript
+export function decodeTradeFlags(flags: BigNumberish): TradeFlags
+```
+
+<CodeGroup>
+```typescript Example
+import { decodeTradeFlags } from "@cowprotocol/contracts";
+
+const decoded = decodeTradeFlags(trade.flags);
+console.log("Order kind:", decoded.kind);
+console.log("Signing scheme:", decoded.signingScheme);
+```
+</CodeGroup>
+
+## Token Registry
+
+Trades reference tokens by index rather than address to save gas. The `TokenRegistry` class manages this mapping:
+
+```typescript
+export class TokenRegistry {
+  get addresses(): string[];
+  index(token: string): number;
+}
+```
+
+<CodeGroup>
+```typescript Example
+import { TokenRegistry } from "@cowprotocol/contracts";
+
+const registry = new TokenRegistry();
+
+// Get token index (adds if not present)
+const wethIndex = registry.index("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+const usdcIndex = registry.index("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+
+console.log("WETH index:", wethIndex); // 0
+console.log("USDC index:", usdcIndex); // 1
+console.log("All tokens:", registry.addresses);
+```
+</CodeGroup>
+
+## Prices
+
+Settlements require clearing prices for all tokens:
+
+```typescript
+export type Prices = Record<string, BigNumberish | undefined>;
+```
+
+### clearingPrices
+
+Converts a price map to an array aligned with the token registry:
+
+```typescript
+clearingPrices(prices: Prices): BigNumberish[]
+```
+
+<CodeGroup>
+```typescript Example
+const prices: Prices = {
+  "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": ethers.utils.parseEther("1"),
+  "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48": ethers.utils.parseUnits("3000", 6),
+};
+
+const priceVector = encoder.clearingPrices(prices);
+console.log("Price vector:", priceVector);
+```
+</CodeGroup>
+
+## Encoded Settlement
+
+### EncodedSettlement Type
+
+```typescript
+export type EncodedSettlement = [
+  string[],              // Token addresses
+  BigNumberish[],        // Clearing prices
+  Trade[],               // Encoded trades
+  [Interaction[], Interaction[], Interaction[]]  // Pre, intra, post interactions
+];
+```
+
+### encodedSettlement
+
+Generates the final encoded settlement:
+
+```typescript
+encodedSettlement(prices: Prices): EncodedSettlement
+```
+
+<CodeGroup>
+```typescript Example
+const settlement = encoder.encodedSettlement(prices);
+
+const [tokens, clearingPrices, trades, interactions] = settlement;
+console.log("Tokens:", tokens);
+console.log("Prices:", clearingPrices);
+console.log("Trades:", trades.length);
+console.log("Interactions:", interactions);
+```
+</CodeGroup>
+
+## InteractionStage Enum
+
+Defines when interactions execute during settlement:
+
+```typescript
+export enum InteractionStage {
+  PRE = 0,    // Before trading
+  INTRA = 1,  // During trading (after sells, before buys)
+  POST = 2,   // After trading
+}
+```
+
+<ParamField path="InteractionStage.PRE" type="number">
+  Executed before any trading. Use for:
+  - EIP-2612 permit calls
+  - Setting up allowances
+  - Pre-trade state changes
+</ParamField>
+
+<ParamField path="InteractionStage.INTRA" type="number">
+  Executed during trading (after sell transfers, before buy transfers). Use for:
+  - AMM swaps
+  - Liquidity interactions
+  - Complex trade routing
+</ParamField>
+
+<ParamField path="InteractionStage.POST" type="number">
+  Executed after all trading completes. Use for:
+  - Post-trade cleanup
+  - Fee distributions
+  - Order refunds
+</ParamField>
+
+## Complete Example
+
+<CodeGroup>
+```typescript Full Settlement
+import {
+  SettlementEncoder,
+  domain,
+  Order,
+  OrderKind,
+  SigningScheme,
+  InteractionStage,
+  Prices,
+} from "@cowprotocol/contracts";
+import { ethers } from "ethers";
+
+async function createSettlement() {
+  // Setup
+  const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+  const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+  const settlementContract = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
+  
+  // Create encoder
+  const encoder = new SettlementEncoder(domain(1, settlementContract));
+
+  // Create orders
+  const order1: Order = {
+    sellToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
+    buyToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",  // USDC
+    sellAmount: ethers.utils.parseEther("1"),
+    buyAmount: ethers.utils.parseUnits("3000", 6),
+    validTo: Math.floor(Date.now() / 1000) + 3600,
+    appData: 0,
+    feeAmount: ethers.utils.parseEther("0.001"),
+    kind: OrderKind.SELL,
+    partiallyFillable: false,
+  };
+
+  const order2: Order = {
+    sellToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", // USDC
+    buyToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
+    sellAmount: ethers.utils.parseUnits("3000", 6),
+    buyAmount: ethers.utils.parseEther("0.99"),
+    validTo: Math.floor(Date.now() / 1000) + 3600,
+    appData: 0,
+    feeAmount: ethers.utils.parseUnits("5", 6),
+    kind: OrderKind.SELL,
+    partiallyFillable: false,
+  };
+
+  // Sign and encode trades
+  await encoder.signEncodeTrade(order1, wallet, SigningScheme.EIP712);
+  await encoder.signEncodeTrade(order2, wallet, SigningScheme.EIP712);
+
+  // Add interactions (optional)
+  encoder.encodeInteraction(
+    {
+      target: "0x1234567890123456789012345678901234567890",
+      callData: "0xabcdef",
+    },
+    InteractionStage.INTRA
+  );
+
+  // Define clearing prices
+  const prices: Prices = {
+    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": ethers.utils.parseEther("1"),
+    "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48": ethers.utils.parseUnits("0.000333", 18),
+  };
+
+  // Generate settlement
+  const settlement = encoder.encodedSettlement(prices);
+
+  return settlement;
+}
+
+// Execute
+const [tokens, prices, trades, interactions] = await createSettlement();
+console.log(`Settlement with ${trades.length} trades across ${tokens.length} tokens`);
+```
+</CodeGroup>
+
+## Decoding
+
+### decodeOrder
+
+Decodes a trade back into an order:
+
+```typescript
+export function decodeOrder(trade: Trade, tokens: string[]): Order
+```
+
+<CodeGroup>
+```typescript Example
+import { decodeOrder } from "@cowprotocol/contracts";
+
+const decodedOrder = decodeOrder(trade, tokens);
+console.log("Sell token:", decodedOrder.sellToken);
+console.log("Buy token:", decodedOrder.buyToken);
+console.log("Sell amount:", decodedOrder.sellAmount.toString());
+```
+</CodeGroup>
+
+## Static Methods
+
+### encodedSetup
+
+Creates a settlement with only interactions (no trades):
+
+```typescript
+static encodedSetup(...interactions: InteractionLike[]): EncodedSettlement
+```
+
+Useful for setting up allowances or initializing contract state.
+
+<CodeGroup>
+```typescript Example
+import { SettlementEncoder } from "@cowprotocol/contracts";
+import { GPv2Settlement__factory } from "@cowprotocol/contracts";
+
+const settlement = GPv2Settlement__factory.connect(address, provider);
+const iface = settlement.interface;
+
+// Create setup-only settlement
+const setupSettlement = SettlementEncoder.encodedSetup(
+  {
+    target: tokenAddress,
+    callData: iface.encodeFunctionData("approve", [spender, amount]),
+  },
+  {
+    target: anotherToken,
+    callData: iface.encodeFunctionData("approve", [spender, amount]),
+  }
+);
+
+// Execute setup
+await settlement.settle(...setupSettlement);
+```
+</CodeGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Token Order" icon="list-ol">
+    Tokens are indexed in the order they're first encountered. Be consistent with token ordering for predictable indices.
+  </Card>
+  
+  <Card title="Price Precision" icon="calculator">
+    Use high precision for clearing prices to minimize rounding errors in settlements.
+  </Card>
+  
+  <Card title="Partial Fills" icon="chart-pie">
+    Always specify `executedAmount` for partially fillable orders to avoid errors.
+  </Card>
+  
+  <Card title="Interaction Stages" icon="stairs">
+    Choose the correct interaction stage based on when the interaction needs to execute relative to token transfers.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Interactions" icon="arrows-split-up-and-left" href="/sdk/interactions">
+    Learn how to create and encode interactions
+  </Card>
+  
+  <Card title="Orders" icon="file-contract" href="/sdk/orders">
+    Review order creation and management
+  </Card>
+</CardGroup>

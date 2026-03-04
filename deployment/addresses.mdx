@@ -1,0 +1,226 @@
+---
+title: "Contract Addresses"
+description: "Complete reference of deployed CoW Protocol contract addresses across all networks"
+---
+
+This page provides a comprehensive reference of all CoW Protocol smart contract addresses across supported networks.
+
+## Core Protocol Contracts
+
+### GPv2Settlement
+
+The main settlement contract that executes trades and manages order fulfillment.
+
+<CodeGroup>
+```javascript All Networks
+const SETTLEMENT_ADDRESS = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
+
+// Same address across all networks:
+// Ethereum (1), Gnosis (100), Arbitrum (42161),
+// Optimism (10), Polygon (137), BSC (56),
+// Base (8453), Avalanche (43114), Sepolia (11155111)
+```
+
+```solidity Solidity
+address constant SETTLEMENT = 0x9008D19f58AAbD9eD0D60971565AA8510560ab41;
+```
+
+```python Python
+SETTLEMENT_ADDRESS = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"
+```
+</CodeGroup>
+
+<Accordion title="View Deployment Details">
+  **Deployment Transactions by Network:**
+
+  | Network | Chain ID | Transaction Hash |
+  |---------|----------|------------------|
+  | Ethereum | 1 | `0xf49f90aa5a268c40001d1227b76bb4dd8247f18361fcad9fffd4a7a44f1320d3` |
+  | Gnosis | 100 | `0x9ddc538f89cd8433f4a19bc4de0de27e7c68a1d04a14b327185e4bba9af87133` |
+  | Arbitrum | 42161 | `0x240486f35ebf42ea69b2b3f1569d587c18c87f98c0ec997bef7d18182ca4c38c` |
+  | Optimism | 10 | `0xd1bbd68ee6b0eecf6f883e148284fc4fb4c960299b75004dfddd5135246cd5eb` |
+  | Polygon | 137 | `0x0e24d3a2a8530eaad5ae62e54e64d57665a77ce3970227d20c1b77da315cbbf6` |
+  | BSC | 56 | `0x9e0c16a655ceadcb95ba2de3bf59d2b3a3d10cce7bdf52aa5520164b58ffd969` |
+  | Base | 8453 | `0x00a3c4e2dc4241465208beeba27e90a9ce3159ad4f41581c4c3a1ef02d6e37cb` |
+  | Avalanche | 43114 | `0x374b84f0ea6bc554abc3ffdc3fbce4374fefc76f2bd25e324ce95a62cafcc142` |
+  | Sepolia | 11155111 | `0x6bba22a00ffcff6bca79aced546e18d2a5a4f4e484a4e4dbafab13daf42f718d` |
+</Accordion>
+
+### GPv2AllowListAuthentication
+
+Manages solver authentication and authorization for the protocol.
+
+<CodeGroup>
+```javascript JavaScript
+const AUTHENTICATOR_ADDRESS = "0x2c4c28DDBdAc9C5E7055b4C863b72eA0149D8aFE";
+```
+
+```typescript TypeScript
+const AUTHENTICATOR_ADDRESS: string = "0x2c4c28DDBdAc9C5E7055b4C863b72eA0149D8aFE";
+```
+
+```go Go
+const AuthenticatorAddress = "0x2c4c28DDBdAc9C5E7055b4C863b72eA0149D8aFE"
+```
+</CodeGroup>
+
+**Contract Structure:**
+
+This contract is deployed using a proxy pattern:
+- **Proxy Address**: `0x2c4c28DDBdAc9C5E7055b4C863b72eA0149D8aFE` (use this for interactions)
+- **Implementation Address**: `0x9E7Ae8Bdba9AA346739792d219a808884996Db67`
+
+<Accordion title="View Deployment Details">
+  **Proxy Deployment Transactions:**
+
+  | Network | Chain ID | Transaction Hash |
+  |---------|----------|------------------|
+  | Ethereum | 1 | `0xb84bf720364f94c749f1ec1cdf0d4c44c70411b716459aaccfd24fc677013375` |
+  | Gnosis | 100 | `0x1a2d87a05a94bc6680a4faee31bbafbd74e9ddb63dd3941c717b5c609c08b957` |
+  | Arbitrum | 42161 | `0xe994adff141a2e72bd9dab3eb7b3480637013bdfb1aa42c62d9d6c90de091237` |
+  | Optimism | 10 | `0x5b6403b485e369ce524d04234807df782e6639e55a7c1d859f0a67925d9a5f49` |
+  | Polygon | 137 | `0x686e4bbcfd6ebae91f0fcc667407c831953629877ec622457916729de3d461c3` |
+  | BSC | 56 | `0x8da639c62eb4a810573c178ed245184944d66c834122e3f88994ebf679b50e34` |
+  | Base | 8453 | `0x5497004d2a37c9eafd0bd1e5861a67d3a209c5b845724166e3dbca9527ee05ec` |
+  | Avalanche | 43114 | `0xa58fc76846917779d7bcbb7d34f4a2a44aab2b702ef983594e34e6972a0c626b` |
+  | Sepolia | 11155111 | `0x73c54c75b3f382304f3adf33e3876c8999fb10df786d4a902733369251033cd1` |
+</Accordion>
+
+### GPv2VaultRelayer
+
+Handles the interaction between CoW Protocol and the Balancer V2 Vault for token transfers.
+
+<CodeGroup>
+```javascript JavaScript
+const VAULT_RELAYER_ADDRESS = "0xC92E8bdf79f0507f65a392b0ab4667716BFE0110";
+```
+
+```rust Rust
+const VAULT_RELAYER_ADDRESS: &str = "0xC92E8bdf79f0507f65a392b0ab4667716BFE0110";
+```
+</CodeGroup>
+
+<Note>
+  The VaultRelayer is deployed as part of the GPv2Settlement deployment process and shares the same deployment transaction.
+</Note>
+
+## Chain ID Reference
+
+Quick reference for network chain IDs:
+
+| Network | Chain ID | Native Token |
+|---------|----------|-------------|
+| Ethereum Mainnet | 1 | ETH |
+| Optimism | 10 | ETH |
+| BNB Smart Chain | 56 | BNB |
+| Gnosis Chain | 100 | xDAI |
+| Polygon | 137 | MATIC |
+| Base | 8453 | ETH |
+| Arbitrum One | 42161 | ETH |
+| Avalanche C-Chain | 43114 | AVAX |
+| Sepolia (Testnet) | 11155111 | ETH |
+
+## Deprecated Networks
+
+<Warning>
+  The following networks have been deprecated and should not be used for new integrations.
+</Warning>
+
+### Rinkeby (Chain ID: 4)
+
+Rinkeby testnet has been deprecated by the Ethereum Foundation.
+
+**Historical Addresses:**
+- GPv2Settlement: `0x9008D19f58AAbD9eD0D60971565AA8510560ab41`
+- GPv2AllowListAuthentication: `0x2c4c28DDBdAc9C5E7055b4C863b72eA0149D8aFE`
+
+### Goerli (Chain ID: 5)
+
+Goerli testnet has been deprecated in favor of Sepolia.
+
+**Historical Addresses:**
+- GPv2Settlement: `0x9008D19f58AAbD9eD0D60971565AA8510560ab41`
+- GPv2AllowListAuthentication: `0x2c4c28DDBdAc9C5E7055b4C863b72eA0149D8aFE`
+
+## Using Contract Addresses
+
+### Web3.js Example
+
+```javascript
+const Web3 = require('web3');
+const web3 = new Web3('YOUR_RPC_URL');
+
+const settlementABI = [ /* ABI from networks.json */ ];
+const settlementAddress = '0x9008D19f58AAbD9eD0D60971565AA8510560ab41';
+
+const settlement = new web3.eth.Contract(settlementABI, settlementAddress);
+
+// Interact with the contract
+const domainSeparator = await settlement.methods.domainSeparator().call();
+```
+
+### Ethers.js Example
+
+```javascript
+const { ethers } = require('ethers');
+
+const provider = new ethers.providers.JsonRpcProvider('YOUR_RPC_URL');
+const settlementAddress = '0x9008D19f58AAbD9eD0D60971565AA8510560ab41';
+const settlementABI = [ /* ABI from networks.json */ ];
+
+const settlement = new ethers.Contract(
+  settlementAddress,
+  settlementABI,
+  provider
+);
+
+// Interact with the contract
+const vault = await settlement.vault();
+console.log('Balancer Vault:', vault);
+```
+
+### Viem Example
+
+```typescript
+import { createPublicClient, http } from 'viem';
+import { mainnet } from 'viem/chains';
+
+const client = createPublicClient({
+  chain: mainnet,
+  transport: http(),
+});
+
+const settlementAddress = '0x9008D19f58AAbD9eD0D60971565AA8510560ab41';
+
+const domainSeparator = await client.readContract({
+  address: settlementAddress,
+  abi: settlementABI,
+  functionName: 'domainSeparator',
+});
+```
+
+## Verifying Contract Addresses
+
+Always verify contract addresses through multiple sources:
+
+1. **Official Repository**: Check the `networks.json` file in the [official GitHub repository](https://github.com/cowprotocol/contracts)
+2. **Block Explorers**: View verified contracts on Etherscan, Gnosisscan, etc.
+3. **Official Documentation**: Cross-reference with the official CoW Protocol documentation
+
+## Address Management Best Practices
+
+<Note>
+  **For Integrators:**
+
+  1. Store addresses in configuration files, not hardcoded
+  2. Use environment variables for different networks
+  3. Implement address validation before transactions
+  4. Keep a local copy of the `networks.json` file
+  5. Subscribe to repository updates for new deployments
+</Note>
+
+## Additional Resources
+
+- [networks.json](https://github.com/cowprotocol/contracts/blob/main/networks.json) - Complete deployment data
+- [Deployment Files](https://github.com/cowprotocol/contracts/tree/main/deployments) - Per-network deployment artifacts
+- [Contract ABIs](https://github.com/cowprotocol/contracts/tree/main/deployments) - Interface definitions for all contracts

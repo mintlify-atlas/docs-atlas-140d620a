@@ -1,0 +1,261 @@
+---
+title: Testing
+description: Comprehensive guide to running tests, generating coverage reports, and debugging the CoW Protocol smart contracts
+---
+
+## Overview
+
+The CoW Protocol Contracts project uses Hardhat and Waffle for testing smart contracts. The test suite includes unit tests, integration tests, and provides tooling for debugging and coverage analysis.
+
+## Running Tests
+
+The basic test command runs the entire test suite:
+
+```bash
+yarn test
+```
+
+This executes all tests using Hardhat's test runner with Mocha and Chai assertions.
+
+## Test Commands
+
+<CodeGroup>
+```bash Standard Tests
+yarn test
+```
+
+```bash Ignored Coverage Tests
+yarn test:ignored-in-coverage
+```
+
+```bash Coverage Report
+yarn coverage
+```
+</CodeGroup>
+
+### Standard Tests
+
+Runs the complete test suite:
+```bash
+yarn test
+```
+
+Equivalent to:
+```bash
+hardhat test
+```
+
+### Tests Ignored in Coverage
+
+Some tests are excluded from coverage analysis due to their nature (e.g., gas benchmarks or edge cases). Run these with:
+```bash
+yarn test:ignored-in-coverage
+```
+
+This sets `MOCHA_CONF='ignored in coverage'` to run the excluded test suite.
+
+## Debug Mode
+
+For detailed test execution logs and debugging information, enable debug mode:
+
+```bash
+DEBUG=* yarn test
+```
+
+This outputs verbose logging using the `debug` package, showing:
+- Contract deployments
+- Transaction details
+- State changes
+- Event emissions
+
+<Note>
+  Debug output can be very verbose. Consider filtering by specific namespaces if needed.
+</Note>
+
+## Gas Reporting
+
+Track gas consumption for contract operations by enabling the gas reporter:
+
+```bash
+REPORT_GAS=1 yarn test
+```
+
+### Gas Reporter Features
+
+When `REPORT_GAS=1` is set, the test output includes:
+
+- Gas costs per function call
+- Deployment costs for contracts
+- Average, min, and max gas consumption
+- Cost estimates in ETH and USD (if configured)
+
+<Steps>
+  <Step title="Enable gas reporting">
+    Set the environment variable before running tests:
+    ```bash
+    export REPORT_GAS=1
+    ```
+  </Step>
+
+  <Step title="Run tests">
+    Execute the test suite:
+    ```bash
+    yarn test
+    ```
+  </Step>
+
+  <Step title="Review gas report">
+    Check the console output for a detailed gas consumption table at the end of the test run.
+  </Step>
+</Steps>
+
+### Configuring Gas Reporter
+
+The gas reporter is configured through Hardhat using the `hardhat-gas-reporter` plugin. Common configuration options include:
+
+- Currency conversion (ETH, USD)
+- Output formatting (terminal, file)
+- Excluded contracts or methods
+
+## Code Coverage
+
+Generate a comprehensive test coverage report:
+
+```bash
+yarn coverage
+```
+
+This command:
+1. Instruments the Solidity contracts
+2. Runs the test suite with coverage tracking
+3. Generates a coverage report
+
+### Understanding Coverage Output
+
+The coverage command produces:
+
+**Console Summary**: Printed to terminal with:
+- Statement coverage percentage
+- Branch coverage percentage
+- Function coverage percentage
+- Line coverage percentage
+
+**HTML Report**: Detailed interactive report at:
+```
+coverage/index.html
+```
+
+Open this file in a browser to explore:
+- File-by-file coverage breakdown
+- Uncovered lines highlighted in red
+- Partially covered branches in yellow
+- Fully covered code in green
+
+<Steps>
+  <Step title="Generate coverage">
+    ```bash
+    yarn coverage
+    ```
+  </Step>
+
+  <Step title="View console summary">
+    Review the coverage percentages in the terminal output.
+  </Step>
+
+  <Step title="Open detailed report">
+    ```bash
+    open coverage/index.html
+    ```
+    Or navigate to the file in your browser.
+  </Step>
+</Steps>
+
+<Warning>
+  Coverage instrumentation modifies contract bytecode, which can affect gas measurements. Never use coverage builds for gas benchmarking.
+</Warning>
+
+## Test Configuration
+
+The project uses Mocha for test execution with configuration controlled by the `MOCHA_CONF` environment variable:
+
+- **Default**: Standard test suite
+- **`ignored in coverage`**: Runs tests excluded from coverage analysis
+- **`coverage`**: Enables coverage-specific test configuration
+
+## Writing Tests
+
+Tests are written using:
+
+- **Hardhat**: Ethereum development environment
+- **Waffle**: Ethereum testing library
+- **Chai**: Assertion library with Waffle matchers
+- **Ethers.js**: Ethereum library for contract interaction
+
+### Common Test Patterns
+
+```typescript
+import { expect } from "chai";
+import { ethers } from "hardhat";
+
+describe("MyContract", function () {
+  it("should perform expected operation", async function () {
+    const MyContract = await ethers.getContractFactory("MyContract");
+    const contract = await MyContract.deploy();
+    await contract.deployed();
+
+    await expect(contract.myFunction())
+      .to.emit(contract, "MyEvent")
+      .withArgs(expectedValue);
+  });
+});
+```
+
+## Testing Best Practices
+
+1. **Isolate tests**: Each test should be independent
+2. **Use fixtures**: Leverage Waffle fixtures for common setup
+3. **Test edge cases**: Include boundary conditions and error cases
+4. **Gas awareness**: Monitor gas costs for critical operations
+5. **Coverage targets**: Aim for high coverage but focus on meaningful tests
+
+## Continuous Integration
+
+The project includes a CI profile in `foundry.toml` for consistent test execution:
+
+```toml
+[profile.ci]
+fuzz.seed = '0'
+```
+
+This ensures deterministic fuzzing results in CI environments.
+
+## Troubleshooting
+
+### Tests Failing
+
+1. **Rebuild contracts**:
+   ```bash
+   yarn build:sol
+   ```
+
+2. **Clear Hardhat cache**:
+   ```bash
+   rm -rf cache/ artifacts/
+   ```
+
+3. **Check node versions**: Ensure compatibility with project requirements
+
+### Coverage Issues
+
+- **Out of memory**: Increase Node.js heap size:
+  ```bash
+  NODE_OPTIONS="--max-old-space-size=4096" yarn coverage
+  ```
+
+- **Timeout errors**: Some tests may need longer timeouts during coverage instrumentation
+
+## Next Steps
+
+- [Benchmark gas performance](/development/benchmarking) of your contracts
+- Review [deployment procedures](/deployment/networks) for production
+- Explore the [contract architecture](/concepts/architecture) documentation

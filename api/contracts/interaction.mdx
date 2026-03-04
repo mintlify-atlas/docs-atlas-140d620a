@@ -1,0 +1,368 @@
+---
+title: GPv2Interaction
+description: Library for executing arbitrary contract interactions during settlements
+---
+
+The `GPv2Interaction` library enables the settlement contract to execute arbitrary contract calls as part of a settlement. This allows for complex trading strategies including liquidity sourcing, token swaps, and protocol integrations.
+
+## Library Overview
+
+```solidity
+library GPv2Interaction
+```
+
+This library provides functionality to execute external contract calls during the settlement process, enabling solvers to interact with DeFi protocols to source liquidity.
+
+## Data Structures
+
+### Data
+
+```solidity
+struct Data {
+    address target;
+    uint256 value;
+    bytes callData;
+}
+```
+
+Represents an arbitrary contract interaction to be executed during settlement.
+
+<ParamField path="target" type="address">
+  The address of the contract to call
+</ParamField>
+
+<ParamField path="value" type="uint256">
+  The amount of ETH (in wei) to send with the call. Use `0` for non-payable calls.
+</ParamField>
+
+<ParamField path="callData" type="bytes">
+  The calldata to send to the target contract. This includes the function selector and encoded parameters.
+</ParamField>
+
+## Functions
+
+### execute
+
+```solidity
+function execute(Data calldata interaction) internal
+```
+
+Executes an arbitrary contract interaction.
+
+<ParamField path="interaction" type="Data">
+  The interaction data specifying the target, value, and calldata
+</ParamField>
+
+<Warning>
+This function reverts if the interaction call fails, propagating the revert reason from the target contract.
+</Warning>
+
+#### Implementation Details
+
+The function uses inline assembly for gas optimization and to avoid unnecessary memory operations:
+
+1. **No Return Data Copying**: The function discards return data since interactions don't need to return values to the settlement contract
+2. **Direct Calldata Copy**: Avoids Solidity's default behavior of copying calldata to memory twice
+3. **Revert Propagation**: If the call fails, the function copies the revert reason and propagates it
+
+```solidity
+assembly {
+    let freeMemoryPointer := mload(0x40)
+    calldatacopy(freeMemoryPointer, callData.offset, callData.length)
+    if iszero(
+        call(
+            gas(),
+            target,
+            value,
+            freeMemoryPointer,
+            callData.length,
+            0,
+            0
+        )
+    ) {
+        returndatacopy(0, 0, returndatasize())
+        revert(0, returndatasize())
+    }
+}
+```
+
+### selector
+
+```solidity
+function selector(
+    Data calldata interaction
+) internal pure returns (bytes4 result)
+```
+
+Extracts the Solidity ABI selector from the interaction's calldata.
+
+<ParamField path="interaction" type="Data">
+  The interaction data to extract the selector from
+</ParamField>
+
+<ResponseField name="result" type="bytes4">
+  The 4-byte function selector. Returns `bytes4(0)` if calldata is shorter than 4 bytes.
+</ResponseField>
+
+<Info>
+The selector is used for the `Interaction` event emitted by the settlement contract. Only the first 4 bytes are logged for gas efficiency.
+</Info>
+
+## Usage in Settlement
+
+Interactions are executed at three different stages during a settlement:
+
+1. **Pre-settlement interactions**: Run before any trades are processed
+2. **Intra-settlement interactions**: Run after input transfers but before output transfers
+3. **Post-settlement interactions**: Run after all trades are completed
+
+### Interaction Flow
+
+```solidity
+function settle(
+    IERC20[] calldata tokens,
+    uint256[] calldata clearingPrices,
+    GPv2Trade.Data[] calldata trades,
+    GPv2Interaction.Data[][3] calldata interactions
+) external {
+    // 1. Execute pre-settlement interactions
+    executeInteractions(interactions[0]);
+    
+    // 2. Compute trades and transfer tokens from users
+    (inTransfers, outTransfers) = computeTradeExecutions(tokens, clearingPrices, trades);
+    vaultRelayer.transferFromAccounts(inTransfers);
+    
+    // 3. Execute intra-settlement interactions
+    executeInteractions(interactions[1]);
+    
+    // 4. Transfer tokens to users
+    vault.transferToAccounts(outTransfers);
+    
+    // 5. Execute post-settlement interactions
+    executeInteractions(interactions[2]);
+}
+```
+
+## Use Cases
+
+### Sourcing Liquidity from DEXs
+
+Interactions can swap tokens through DEXs to source liquidity:
+
+```solidity
+// Pre-settlement: Acquire USDC by selling DAI on Uniswap
+GPv2Interaction.Data memory uniswapSwap = GPv2Interaction.Data({
+    target: UNISWAP_ROUTER,
+    value: 0,
+    callData: abi.encodeWithSelector(
+        IUniswapRouter.swapExactTokensForTokens.selector,
+        1000e18,  // amountIn (DAI)
+        990e6,    // amountOutMin (USDC)
+        path,     // [DAI, USDC]
+        address(settlement),
+        deadline
+    )
+});
+```
+
+### Unwrapping Tokens
+
+Convert wrapped tokens to their native form:
+
+```solidity
+// Post-settlement: Unwrap WETH to ETH
+GPv2Interaction.Data memory unwrap = GPv2Interaction.Data({
+    target: WETH_ADDRESS,
+    value: 0,
+    callData: abi.encodeWithSelector(
+        IWETH.withdraw.selector,
+        amount
+    )
+});
+```
+
+### Approving Tokens
+
+Set token approvals for external protocols:
+
+```solidity
+// Pre-settlement: Approve Curve to spend DAI
+GPv2Interaction.Data memory approve = GPv2Interaction.Data({
+    target: DAI_ADDRESS,
+    value: 0,
+    callData: abi.encodeWithSelector(
+        IERC20.approve.selector,
+        CURVE_POOL,
+        type(uint256).max
+    )
+});
+```
+
+### Calling Aggregators
+
+Route trades through aggregators like 1inch or 0x:
+
+```solidity
+// Intra-settlement: Execute trade through 1inch
+GPv2Interaction.Data memory aggregatorSwap = GPv2Interaction.Data({
+    target: ONEINCH_ROUTER,
+    value: 0,
+    callData: aggregatorCalldata  // Pre-computed off-chain
+});
+```
+
+## Security Considerations
+
+### Protected Targets
+
+<Warning>
+The settlement contract explicitly prevents interactions with the `vaultRelayer` contract to protect user funds:
+
+```solidity
+require(
+    interaction.target != address(vaultRelayer),
+    "GPv2: forbidden interaction"
+);
+```
+</Warning>
+
+### Solver Authorization
+
+Only authorized solvers can submit settlements with interactions. This prevents:
+- Malicious contract calls
+- Theft of settlement contract funds
+- Abuse of accumulated protocol fees
+
+<Info>
+Misbehaving solvers will be slashed for abusing their privileges, providing economic security.
+</Info>
+
+### Reentrancy Protection
+
+The settlement contract uses the `ReentrancyGuard` to prevent reentrancy attacks during interaction execution.
+
+### Gas Considerations
+
+Interactions consume gas from the settlement transaction. Solvers must ensure:
+- Interactions complete within the block gas limit
+- Gas costs are accounted for in solver profitability calculations
+
+## Best Practices
+
+### Order of Interactions
+
+1. **Pre-settlement**: Use for setup operations
+   - Token approvals
+   - Acquiring initial liquidity
+   - Setting protocol parameters
+
+2. **Intra-settlement**: Use for liquidity transformations
+   - DEX swaps with collected input tokens
+   - Protocol interactions requiring input tokens
+
+3. **Post-settlement**: Use for cleanup operations
+   - Unwrapping tokens
+   - Returning excess tokens
+   - Freeing storage for gas refunds
+
+### Error Handling
+
+<Note>
+Since interactions revert on failure, ensure all interaction calls are likely to succeed. Consider:
+- Checking contract existence before calling
+- Using appropriate slippage parameters
+- Verifying sufficient balances
+</Note>
+
+### Calldata Construction
+
+When constructing interaction calldata:
+
+```solidity
+// Good: Use type-safe encoding
+bytes memory callData = abi.encodeWithSelector(
+    ITarget.function.selector,
+    param1,
+    param2
+);
+
+// Avoid: Manual byte manipulation (error-prone)
+bytes memory callData = abi.encodePacked(
+    bytes4(0x12345678),
+    param1,
+    param2
+);
+```
+
+## Example: Multi-Hop Swap
+
+Complete example of using interactions for a multi-hop trade:
+
+```solidity
+// Setup: User wants to trade DAI -> USDC, but best price is DAI -> WETH -> USDC
+
+// Interaction 0 (pre-settlement): Approve Uniswap to spend DAI
+GPv2Interaction.Data memory approveDAI = GPv2Interaction.Data({
+    target: DAI_ADDRESS,
+    value: 0,
+    callData: abi.encodeWithSelector(
+        IERC20.approve.selector,
+        UNISWAP_V3_ROUTER,
+        type(uint256).max
+    )
+});
+
+// Interaction 1 (intra-settlement): Swap DAI -> WETH
+GPv2Interaction.Data memory swapToWETH = GPv2Interaction.Data({
+    target: UNISWAP_V3_ROUTER,
+    value: 0,
+    callData: abi.encodeWithSelector(
+        ISwapRouter.exactInputSingle.selector,
+        ISwapRouter.ExactInputSingleParams({
+            tokenIn: DAI_ADDRESS,
+            tokenOut: WETH_ADDRESS,
+            fee: 3000,
+            recipient: address(settlement),
+            deadline: block.timestamp,
+            amountIn: 1000e18,
+            amountOutMinimum: 0.5 ether,
+            sqrtPriceLimitX96: 0
+        })
+    )
+});
+
+// Interaction 2 (intra-settlement): Swap WETH -> USDC  
+GPv2Interaction.Data memory swapToUSDC = GPv2Interaction.Data({
+    target: UNISWAP_V3_ROUTER,
+    value: 0,
+    callData: abi.encodeWithSelector(
+        ISwapRouter.exactInputSingle.selector,
+        ISwapRouter.ExactInputSingleParams({
+            tokenIn: WETH_ADDRESS,
+            tokenOut: USDC_ADDRESS,
+            fee: 3000,
+            recipient: address(settlement),
+            deadline: block.timestamp,
+            amountIn: 0.5 ether,
+            amountOutMinimum: 990e6,
+            sqrtPriceLimitX96: 0
+        })
+    )
+});
+
+// Construct interactions array
+GPv2Interaction.Data[][3] memory interactions;
+interactions[0] = [approveDAI];           // Pre-settlement
+interactions[1] = [swapToWETH, swapToUSDC]; // Intra-settlement
+interactions[2] = [];                      // Post-settlement
+```
+
+## Events
+
+When an interaction is executed, the settlement contract emits:
+
+```solidity
+event Interaction(address indexed target, uint256 value, bytes4 selector)
+```
+
+This allows off-chain monitoring of interaction execution. The selector is extracted using the `selector()` function for gas-efficient logging.

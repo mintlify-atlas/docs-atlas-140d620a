@@ -1,0 +1,373 @@
+---
+title: "Order"
+description: "Order data structures and utilities for CoW Protocol"
+---
+
+The order module provides types and functions for creating, hashing, and managing CoW Protocol orders.
+
+## Types
+
+### Order
+
+Gnosis Protocol v2 order data structure.
+
+```typescript
+interface Order {
+  sellToken: string;
+  buyToken: string;
+  receiver?: string;
+  sellAmount: BigNumberish;
+  buyAmount: BigNumberish;
+  validTo: Timestamp;
+  appData: HashLike;
+  feeAmount: BigNumberish;
+  kind: OrderKind;
+  partiallyFillable: boolean;
+  sellTokenBalance?: OrderBalance;
+  buyTokenBalance?: OrderBalance;
+}
+```
+
+<ParamField path="sellToken" type="string" required>
+  The ERC20 token address to sell.
+</ParamField>
+
+<ParamField path="buyToken" type="string" required>
+  The ERC20 token address to buy. Use `BUY_ETH_ADDRESS` to buy native Ether.
+</ParamField>
+
+<ParamField path="receiver" type="string" optional>
+  An optional address to receive the proceeds instead of the order owner. Defaults to order signer if not specified.
+</ParamField>
+
+<ParamField path="sellAmount" type="BigNumberish" required>
+  The order sell amount. For sell orders, this is the exact amount to sell. For buy orders, this is the maximum amount to sell. For partial fill orders, this is part of the limit price.
+</ParamField>
+
+<ParamField path="buyAmount" type="BigNumberish" required>
+  The order buy amount. For sell orders, this is the minimum amount to buy. For buy orders, this is the exact amount to buy. For partial fill orders, this is part of the limit price.
+</ParamField>
+
+<ParamField path="validTo" type="Timestamp" required>
+  The Unix timestamp (in seconds) or Date object when this order expires.
+</ParamField>
+
+<ParamField path="appData" type="HashLike" required>
+  32-byte application specific data. Can be a number or bytes. Used to ensure order uniqueness and store metadata.
+</ParamField>
+
+<ParamField path="feeAmount" type="BigNumberish" required>
+  Fee amount in sell token to give to the protocol.
+</ParamField>
+
+<ParamField path="kind" type="OrderKind" required>
+  The order kind: `OrderKind.SELL` or `OrderKind.BUY`.
+</ParamField>
+
+<ParamField path="partiallyFillable" type="boolean" required>
+  Whether the order can be partially filled over multiple settlements.
+</ParamField>
+
+<ParamField path="sellTokenBalance" type="OrderBalance" optional>
+  How the sell token balance will be withdrawn. Defaults to `OrderBalance.ERC20`.
+</ParamField>
+
+<ParamField path="buyTokenBalance" type="OrderBalance" optional>
+  How the buy token balance will be paid. Defaults to `OrderBalance.ERC20`.
+</ParamField>
+
+### OrderKind
+
+Enum specifying the order type.
+
+```typescript
+enum OrderKind {
+  SELL = "sell",
+  BUY = "buy"
+}
+```
+
+- `SELL`: Sell order (exact sell amount, minimum buy amount)
+- `BUY`: Buy order (exact buy amount, maximum sell amount)
+
+### OrderBalance
+
+Enum for balance withdrawal/payment configuration.
+
+```typescript
+enum OrderBalance {
+  ERC20 = "erc20",
+  EXTERNAL = "external",
+  INTERNAL = "internal"
+}
+```
+
+- `ERC20`: Use standard ERC20 token balances (default)
+- `EXTERNAL`: Use Balancer Vault external balances (sell only)
+- `INTERNAL`: Use Balancer Vault internal balances
+
+### OrderCancellations
+
+Order cancellation data.
+
+```typescript
+interface OrderCancellations {
+  orderUids: BytesLike[];
+}
+```
+
+<ParamField path="orderUids" type="BytesLike[]" required>
+  Array of unique order identifiers to cancel.
+</ParamField>
+
+### OrderUidParams
+
+Parameters for computing order unique identifiers.
+
+```typescript
+interface OrderUidParams {
+  orderDigest: string;
+  owner: string;
+  validTo: number | Date;
+}
+```
+
+<ParamField path="orderDigest" type="string" required>
+  The EIP-712 order struct hash (32 bytes).
+</ParamField>
+
+<ParamField path="owner" type="string" required>
+  The address of the order owner.
+</ParamField>
+
+<ParamField path="validTo" type="number | Date" required>
+  The timestamp when the order expires.
+</ParamField>
+
+## Functions
+
+### normalizeOrder
+
+Normalizes an order for hashing and signing operations.
+
+```typescript
+function normalizeOrder(order: Order): NormalizedOrder
+```
+
+<ParamField path="order" type="Order" required>
+  The order to normalize.
+</ParamField>
+
+<ResponseField name="NormalizedOrder" type="NormalizedOrder">
+  A normalized order with all optional fields filled and values converted to standard formats.
+</ResponseField>
+
+### hashOrder
+
+Computes the 32-byte EIP-712 signing hash for an order.
+
+```typescript
+function hashOrder(
+  domain: TypedDataDomain,
+  order: Order
+): string
+```
+
+<ParamField path="domain" type="TypedDataDomain" required>
+  The EIP-712 domain separator.
+</ParamField>
+
+<ParamField path="order" type="Order" required>
+  The order to hash.
+</ParamField>
+
+<ResponseField name="hash" type="string">
+  Hex-encoded 32-byte order digest.
+</ResponseField>
+
+### computeOrderUid
+
+Computes the unique order identifier for an order and owner.
+
+```typescript
+function computeOrderUid(
+  domain: TypedDataDomain,
+  order: Order,
+  owner: string
+): string
+```
+
+<ParamField path="domain" type="TypedDataDomain" required>
+  The EIP-712 domain separator.
+</ParamField>
+
+<ParamField path="order" type="Order" required>
+  The order to compute the UID for.
+</ParamField>
+
+<ParamField path="owner" type="string" required>
+  The address of the order owner.
+</ParamField>
+
+<ResponseField name="orderUid" type="string">
+  A 56-byte hex string uniquely identifying the order.
+</ResponseField>
+
+### packOrderUidParams
+
+Packs order UID parameters into a 56-byte order UID.
+
+```typescript
+function packOrderUidParams(
+  params: OrderUidParams
+): string
+```
+
+<ParamField path="params" type="OrderUidParams" required>
+  The order UID parameters to pack.
+</ParamField>
+
+<ResponseField name="orderUid" type="string">
+  A 56-byte hex string containing the packed orderDigest (32 bytes), owner (20 bytes), and validTo (4 bytes).
+</ResponseField>
+
+### extractOrderUidParams
+
+Extracts order UID parameters from a 56-byte order UID.
+
+```typescript
+function extractOrderUidParams(orderUid: string): OrderUidParams
+```
+
+<ParamField path="orderUid" type="string" required>
+  The 56-byte hex-encoded order UID.
+</ParamField>
+
+<ResponseField name="params" type="OrderUidParams">
+  The extracted order digest, owner address, and validTo timestamp.
+</ResponseField>
+
+### timestamp
+
+Normalizes a timestamp value to a Unix timestamp (seconds since epoch).
+
+```typescript
+function timestamp(t: Timestamp): number
+```
+
+<ParamField path="t" type="Timestamp" required>
+  A number (Unix timestamp) or Date object.
+</ParamField>
+
+<ResponseField name="timestamp" type="number">
+  Unix timestamp in seconds.
+</ResponseField>
+
+### hashify
+
+Normalizes an app data value to a 32-byte hash.
+
+```typescript
+function hashify(h: HashLike): string
+```
+
+<ParamField path="h" type="HashLike" required>
+  A hash-like value (BytesLike or number) to normalize.
+</ParamField>
+
+<ResponseField name="hash" type="string">
+  A 32-byte hash encoded as a hex string.
+</ResponseField>
+
+### normalizeBuyTokenBalance
+
+Normalizes the balance configuration for a buy token.
+
+```typescript
+function normalizeBuyTokenBalance(
+  balance: OrderBalance | undefined
+): OrderBalance.ERC20 | OrderBalance.INTERNAL
+```
+
+<ParamField path="balance" type="OrderBalance | undefined" required>
+  The balance configuration to normalize.
+</ParamField>
+
+<ResponseField name="balance" type="OrderBalance.ERC20 | OrderBalance.INTERNAL">
+  The normalized balance configuration. `EXTERNAL` is converted to `ERC20`.
+</ResponseField>
+
+## Constants
+
+### BUY_ETH_ADDRESS
+
+Marker address to indicate an order is buying native Ether.
+
+```typescript
+const BUY_ETH_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+```
+
+<Note>
+This address only has special meaning in the `buyToken` field. Using it as `sellToken` will cause the settlement to revert.
+</Note>
+
+### ORDER_TYPE_FIELDS
+
+The EIP-712 type fields definition for a CoW Protocol order.
+
+```typescript
+const ORDER_TYPE_FIELDS = [
+  { name: "sellToken", type: "address" },
+  { name: "buyToken", type: "address" },
+  { name: "receiver", type: "address" },
+  { name: "sellAmount", type: "uint256" },
+  { name: "buyAmount", type: "uint256" },
+  { name: "validTo", type: "uint32" },
+  { name: "appData", type: "bytes32" },
+  { name: "feeAmount", type: "uint256" },
+  { name: "kind", type: "string" },
+  { name: "partiallyFillable", type: "bool" },
+  { name: "sellTokenBalance", type: "string" },
+  { name: "buyTokenBalance", type: "string" },
+];
+```
+
+### ORDER_UID_LENGTH
+
+The byte length of an order UID (56 bytes).
+
+```typescript
+const ORDER_UID_LENGTH = 56;
+```
+
+## Example
+
+```typescript
+import {
+  Order,
+  OrderKind,
+  hashOrder,
+  computeOrderUid,
+  domain,
+} from "@cowprotocol/contracts";
+
+const order: Order = {
+  sellToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
+  buyToken: "0x6B175474E89094C44Da98b954EedeAC495271d0F", // DAI
+  sellAmount: "1000000000000000000", // 1 WETH
+  buyAmount: "3000000000000000000000", // 3000 DAI
+  validTo: Math.floor(Date.now() / 1000) + 3600, // Valid for 1 hour
+  appData: 1,
+  feeAmount: "5000000000000000", // 0.005 WETH fee
+  kind: OrderKind.SELL,
+  partiallyFillable: false,
+};
+
+const settlementDomain = domain(1, "0x9008D19f58AAbD9eD0D60971565AA8510560ab41");
+const orderHash = hashOrder(settlementDomain, order);
+const orderUid = computeOrderUid(
+  settlementDomain,
+  order,
+  "0x1234567890123456789012345678901234567890"
+);
+```
